@@ -870,35 +870,27 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
                 use_top_left_mask=self._flash_attn_uses_top_left_mask,
             )
         else:
-            q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix = prefix_grouper.ungroup(
-                query_states.transpose(1, 2), 
-                key_states.transpose(1, 2), 
+            def attn_func(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attn_mask: torch.Tensor, *args, **kwargs):
+                return _flash_attention_forward(
+                    q.transpose(1, 2),
+                    k.transpose(1, 2),
+                    v.transpose(1, 2),
+                    attn_mask,
+                    q.size(2),
+                    *args,
+                    **kwargs,
+                )
+            
+            attn_output = prefix_grouper.forward(
+                query_states.transpose(1, 2),
+                key_states.transpose(1, 2),
                 value_states.transpose(1, 2),
-            )
-
-            prefix_attn_output = _flash_attention_forward(
-                q_prefix.transpose(1, 2),
-                k_prefix.transpose(1, 2),
-                v_prefix.transpose(1, 2),
-                prefix_grouper.prefix_attn_mask.to(q_prefix.device),
-                q_prefix.size(2),
+                attn_func,
                 dropout=dropout_rate,
                 sliding_window=sliding_window,
                 is_causal=self.is_causal,
                 use_top_left_mask=self._flash_attn_uses_top_left_mask,
             )
-            suffix_attn_output = _flash_attention_forward(
-                q_suffix.transpose(1, 2),
-                prefix_grouper.batch_repeat_cat(k_prefix, k_suffix, cat_dim=2).transpose(1, 2),
-                prefix_grouper.batch_repeat_cat(v_prefix, v_suffix, cat_dim=2).transpose(1, 2),
-                prefix_grouper.suffix_attn_mask.to(q_suffix.device),
-                q_suffix.size(2),
-                dropout=dropout_rate,
-                sliding_window=sliding_window,
-                is_causal=self.is_causal,
-                use_top_left_mask=self._flash_attn_uses_top_left_mask,
-            )
-            attn_output = prefix_grouper.group(prefix_attn_output, suffix_attn_output)
 
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
         attn_output = self.o_proj(attn_output)
