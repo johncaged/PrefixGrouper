@@ -1,11 +1,22 @@
-from typing import TYPE_CHECKING, Callable
 from abc import ABC, abstractmethod
 import torch
+from .utils.typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from . import PrefixGrouper
 
-AttnFuncType = Callable[..., torch.Tensor]
+
+class AttnFuncType(Protocol):
+    def __call__(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attn_mask: torch.Tensor,
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        pass
 
 
 class AttentionForwardABC(ABC):
@@ -27,6 +38,11 @@ class AttentionForwardABC(ABC):
 
 class AttentionForward(AttentionForwardABC):
     def __init__(self, attn_func: AttnFuncType):
+        """
+        Apply attention forward using ``attn_func``.
+
+        NOTE: the ``attn_func`` should accept q, k, v and attn_mask as the first 4 positional arguments.
+        """
         super().__init__()
         self.attn_func = attn_func
 

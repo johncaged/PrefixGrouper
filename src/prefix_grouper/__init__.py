@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, overload, Union, Tuple
 import torch
+from .utils.typing import List, Optional, overload, Union, Tuple
 from .function import GroupFunction, UngroupFunction
 from .forward import AttentionForward, AttnFuncType
 
