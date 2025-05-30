@@ -245,6 +245,8 @@ class PrefixGrouper:
         assert torch.all(
             token_cnt == sums
         ), f"Number of True values in padding mask does not match ``group_info``, got {token_cnt} and {sums}"
+        # NOTE: The ``padding_mask`` can be used as ``attention_mask`` in the model forward process.
+        self.padding_mask = padding_mask
         # Grouped Prefix Mask [num_groups, max_total_len]
         grouped_prefix_mask = self.create_submask(
             padding_mask,
@@ -308,6 +310,10 @@ class PrefixGrouper:
     def batch_repeat_cat(
         self, prefix: torch.Tensor, suffix: torch.Tensor, cat_dim: int
     ) -> torch.Tensor:
+        """
+        Repeat the prefix tensor according to ``num_samples``, and cat it to the 
+        suffix tensor. NOTE: The tensor should be batch-first.
+        """
         return torch.cat(
             [
                 prefix.repeat_interleave(
