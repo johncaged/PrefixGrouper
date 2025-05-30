@@ -882,10 +882,10 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
                 )
             
             attn_output = prefix_grouper.forward(
+                attn_func,
                 query_states.transpose(1, 2),
                 key_states.transpose(1, 2),
                 value_states.transpose(1, 2),
-                attn_func,
                 dropout=dropout_rate,
                 sliding_window=sliding_window,
                 is_causal=self.is_causal,

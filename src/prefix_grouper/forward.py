@@ -32,11 +32,12 @@ class AttentionForward(AttentionForwardABC):
 
     def __call__(
         self,
+        prefix_grouper: "PrefixGrouper",
+        # NOTE: the following are the original params needed in ``attn_func``
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
         *args,
-        prefix_grouper: "PrefixGrouper",
         **kwargs,
     ) -> torch.Tensor:
         q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix = (

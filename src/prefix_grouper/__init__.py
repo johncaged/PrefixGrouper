@@ -91,19 +91,20 @@ class PrefixGrouper(PrefixGrouperABC):
 
     def forward(
         self,
+        __attn_func: AttnFuncType,
+        # NOTE: the following are the original params needed in ``attn_func``
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
-        attn_func: AttnFuncType,
         *args,
         **kwargs,
     ) -> torch.Tensor:
-        return AttentionForward(attn_func)(
+        return AttentionForward(__attn_func)(
+            self,
             q,
             k,
             v,
             *args,
-            prefix_grouper=self,
             **kwargs,
         )
 
