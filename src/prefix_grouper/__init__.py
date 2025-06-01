@@ -8,6 +8,7 @@ SUPPORTED_PADDING_MODES = ["left", "right"]
 UngroupedTuple = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
+SplittedOutputTuple = Tuple[torch.Tensor, torch.Tensor]
 
 
 class PrefixGrouperABC(ABC):
@@ -40,6 +41,21 @@ class PrefixGrouper(PrefixGrouperABC):
         self.group_info = group_info
         self.precompute(device, padding_mode)
 
+    def get_ungroup_args(self, device=None):
+        """
+        Get ungroup indices and shapes.
+        """
+        prefix_x_shape = self.prefix_x_shape
+        suffix_x_shape = self.suffix_x_shape
+        indices = (
+            self.ungrouped_prefix_indices.to(device),
+            self.ungrouped_suffix_indices.to(device),
+            self.grouped_prefix_indices.to(device),
+            self.grouped_suffix_indices.to(device),
+        )
+        shapes = (prefix_x_shape, suffix_x_shape)
+        return indices, shapes
+
     def ungroup(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> UngroupedTuple:
@@ -52,15 +68,7 @@ class PrefixGrouper(PrefixGrouperABC):
 
         NOTE: You should carefully check the input and output shapes.
         """
-        prefix_x_shape = self.prefix_x_shape
-        suffix_x_shape = self.suffix_x_shape
-        indices = (
-            self.ungrouped_prefix_indices.to(q.device),
-            self.ungrouped_suffix_indices.to(q.device),
-            self.grouped_prefix_indices.to(q.device),
-            self.grouped_suffix_indices.to(q.device),
-        )
-        shapes = (prefix_x_shape, suffix_x_shape)
+        indices, shapes = self.get_ungroup_args(q.device)
         q_prefix, q_suffix = UngroupFunction.apply(q, indices, shapes)
         k_prefix, k_suffix = UngroupFunction.apply(k, indices, shapes)
         v_prefix, v_suffix = UngroupFunction.apply(v, indices, shapes)
@@ -88,6 +96,44 @@ class PrefixGrouper(PrefixGrouperABC):
             ),
             self.x_shape,
         )
+
+    def split_output(
+        self,
+        output: torch.Tensor,
+        include_prefix_last: int = 0,
+    ) -> SplittedOutputTuple:
+        """
+        Split the output into prefix and suffix parts.
+
+        Input: output tensors in the shape of [b, seq, dim]
+
+        Output: prefix, suffix tensors in the shape of [b, seq, dim]
+        """
+        assert include_prefix_last >= 0
+        indices, shapes = self.get_ungroup_args(output.device)
+        prefix_output, suffix_output = UngroupFunction.apply(
+            output.unsqueeze(1),  # NOTE: unsqueeze to fit the ungroup function
+            indices,
+            shapes,
+        )
+        prefix_output, suffix_output = (
+            prefix_output.squeeze(1),
+            suffix_output.squeeze(1),
+        )
+        prefix_mask, suffix_mask = (
+            self.ungrouped_prefix_mask,
+            self.ungrouped_suffix_mask,
+        )
+        if include_prefix_last > 0:
+            suffix_output = self.batch_repeat_cat(
+                prefix_output[:, -include_prefix_last:], suffix_output, cat_dim=1
+            )
+            prefix_output = prefix_output[:, :-include_prefix_last]
+            suffix_mask = self.batch_repeat_cat(
+                prefix_mask[:, -include_prefix_last:], suffix_mask, cat_dim=1
+            )
+            prefix_mask = prefix_mask[:, :-include_prefix_last]
+        return prefix_output, prefix_mask, suffix_output, suffix_mask
 
     def forward(
         self,
@@ -124,16 +170,15 @@ class PrefixGrouper(PrefixGrouperABC):
         sums = torch.tensor([sum(g) for g in self.group_info], device=device)
         self.max_total_len: int = int(sums.max().item())
 
-        # First, process grouped indices
+        # First, process grouped masks
         if isinstance(padding_mode, str):
             # Calculate ``padding_delta`` for left padding
-            padding_delta = self.max_total_len - sums
             padding_mask = self.create_mask(
                 sums,
                 max_len=self.max_total_len,
+                seq_len=sums,
                 padding_mode=padding_mode,
                 device=device,
-                padding_delta=padding_delta,
             )
         else:
             padding_mask = padding_mode.to(device)
@@ -149,66 +194,68 @@ class PrefixGrouper(PrefixGrouperABC):
             token_cnt == sums
         ), f"Number of True values in padding mask does not match ``group_info``, got {token_cnt} and {sums}"
         # NOTE: The ``padding_mask`` can be used as ``attention_mask`` in the model forward process.
-        self.padding_mask = padding_mask
+        self.padding_mask = padding_mask.bool()
         # Grouped Prefix Mask [num_groups, max_total_len]
-        grouped_prefix_mask = self.create_submask(
+        self.grouped_prefix_mask = self.create_submask(
             padding_mask,
             torch.tensor(prefix_elements, device=device),
-        )
+        ).bool()
         # Grouped Suffix Mask [num_groups, max_total_len]
         starts = torch.tensor(prefix_elements, device=device)
         lengths = torch.tensor([sum(g[1:]) for g in self.group_info], device=device)
         ends = starts + lengths
-        grouped_suffix_mask = self.create_submask(
+        self.grouped_suffix_mask = self.create_submask(
             padding_mask,
             starts,
             ends,
-        )
-        self.grouped_prefix_indices = grouped_prefix_mask.nonzero(as_tuple=False).to(
-            device
-        )
-        self.grouped_suffix_indices = grouped_suffix_mask.nonzero(as_tuple=False).to(
-            device
-        )
+        ).bool()
 
-        # Second, process ungrouped indices
-        # NOTE: Ungrouped prefix and suffix are always right-padding, because it doesn't
-        # matter whether it's left-padding or right-padding in the attention operations,
-        # so we keep it right-padding for consistency and avoiding potential bugs.
+        # Second, process ungrouped masks
+        # NOTE: Ungrouped prefix is always left-padding and suffix is always right-padding,
+        # because it doesn't matter whether it's left-padding or right-padding in the
+        # attention operations, so we choose to have no padding between the prefix and suffix
+        # for consistency and convenience.
         # Ungrouped Prefix Mask [num_groups, max_prefix_len]
         self.max_prefix_len: int = max(prefix_elements) if prefix_elements else 0
-        ungrouped_prefix_mask: torch.Tensor = self.create_mask(
-            torch.tensor(prefix_elements, device=device),
+        prefix_len = torch.tensor(prefix_elements, device=device)
+        self.ungrouped_prefix_mask = self.create_mask(
+            prefix_len,
             max_len=self.max_prefix_len,
-            padding_mode="right",
+            seq_len=prefix_len,
+            padding_mode="left",
             device=device,
-        )
+        ).bool()
         # Ungrouped Suffix Mask [num_samples, max_suffix_len]
         self.max_suffix_len: int = max(suffix_elements) if suffix_elements else 0
-        ungrouped_suffix_mask: torch.Tensor = self.create_mask(
+        self.ungrouped_suffix_mask = self.create_mask(
             torch.tensor(suffix_elements, device=device),
             max_len=self.max_suffix_len,
             padding_mode="right",
             device=device,
-        )
+        ).bool()
+        # Attention Mask
+        self.prefix_attn_mask = self.ungrouped_prefix_mask.bool()
+        self.suffix_attn_mask = self.batch_repeat_cat(
+            self.ungrouped_prefix_mask, self.ungrouped_suffix_mask, cat_dim=1
+        ).bool()
         # Cache indices
         # Tuple[batch_dim, seq_dim]
-        self.ungrouped_prefix_indices = ungrouped_prefix_mask.nonzero(
+        self.grouped_prefix_indices = self.grouped_prefix_mask.nonzero(
             as_tuple=False
         ).to(device)
-        self.ungrouped_suffix_indices = ungrouped_suffix_mask.nonzero(
+        self.grouped_suffix_indices = self.grouped_suffix_mask.nonzero(
             as_tuple=False
         ).to(device)
-
-        # x shape
-        self.x_shape = grouped_prefix_mask.shape
-        self.prefix_x_shape = ungrouped_prefix_mask.shape
-        self.suffix_x_shape = ungrouped_suffix_mask.shape
-        # Attention Mask
-        self.prefix_attn_mask = ungrouped_prefix_mask.bool()
-        self.suffix_attn_mask = self.batch_repeat_cat(
-            ungrouped_prefix_mask, ungrouped_suffix_mask, cat_dim=1
-        ).bool()
+        self.ungrouped_prefix_indices = self.ungrouped_prefix_mask.nonzero(
+            as_tuple=False
+        ).to(device)
+        self.ungrouped_suffix_indices = self.ungrouped_suffix_mask.nonzero(
+            as_tuple=False
+        ).to(device)
+        # Cache input shapes
+        self.x_shape = self.padding_mask.shape
+        self.prefix_x_shape = self.ungrouped_prefix_mask.shape
+        self.suffix_x_shape = self.ungrouped_suffix_mask.shape
 
     def batch_repeat_cat(
         self, prefix: torch.Tensor, suffix: torch.Tensor, cat_dim: int
@@ -250,9 +297,9 @@ class PrefixGrouper(PrefixGrouperABC):
         end_indices: torch.Tensor,
         *,
         max_len: int,
+        seq_len: Optional[torch.Tensor] = None,
         padding_mode: str = "right",
         device: torch.device = None,
-        padding_delta: Union[int, torch.Tensor] = 0,
     ) -> torch.Tensor: ...
     @overload
     def create_mask(
@@ -261,9 +308,9 @@ class PrefixGrouper(PrefixGrouperABC):
         end_indices: torch.Tensor,
         *,
         max_len: int,
+        seq_len: Optional[torch.Tensor] = None,
         padding_mode: str = "right",
         device: torch.device = None,
-        padding_delta: Union[int, torch.Tensor] = 0,
     ) -> torch.Tensor: ...
     def create_mask(
         self,
@@ -271,11 +318,9 @@ class PrefixGrouper(PrefixGrouperABC):
         indices2: Optional[torch.Tensor] = None,
         *,
         max_len: int,
+        seq_len: Optional[torch.Tensor] = None,
         padding_mode: str = "right",
         device: torch.device = None,
-        padding_delta: Union[
-            int, torch.Tensor
-        ] = 0,  # NOTE: Used when ``padding_mode`` is "left"
     ) -> torch.Tensor:
         """
         create mask based on padding mode
@@ -284,6 +329,11 @@ class PrefixGrouper(PrefixGrouperABC):
             indices1=indices1, indices2=indices2
         )
         if padding_mode == "left":
+            if seq_len is None:
+                raise ValueError(
+                    "``seq_len`` cannot be ``None`` when ``padding_mode`` is left"
+                )
+            padding_delta = max_len - seq_len
             start_indices = start_indices + padding_delta
             end_indices = end_indices + padding_delta
         positions = torch.arange(max_len, device=device)
