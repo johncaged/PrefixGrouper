@@ -22,6 +22,10 @@ class Info(Sequence[int]):
         # NOTE: This is for backward compatibility, and is a low-efficiency implementation
         return [self.prefix_len, *self.suffix_lens][__index]
 
+    def __len__(self) -> int:
+        # NOTE: This is for backward compatibility
+        return 1 + len(self.suffix_lens)
+
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(prefix_len={self.prefix_len}, suffix_lens={self.suffix_lens})"
 
@@ -151,6 +155,10 @@ class GroupInfo(Sequence[Info]):
     def __getitem__(self, __index: Union[SupportsIndex, slice]):
         # NOTE: For backward compatibility
         return self.info_list[__index]
+
+    def __len__(self) -> int:
+        # NOTE: This is for backward compatibility
+        return len(self.info_list)
 
     def __str__(self) -> str:
         return str(self.info_list)
