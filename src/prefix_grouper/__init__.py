@@ -142,3 +142,7 @@ class PrefixGrouper:
             cat_dim=cat_dim,
             num_samples=self.group_info.num_samples,
         )
+    
+    def __getattr__(self, name: str):
+        # NOTE: For backward compatibility
+        return getattr(self.group_info, name)

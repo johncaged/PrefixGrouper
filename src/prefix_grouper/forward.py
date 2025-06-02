@@ -64,7 +64,7 @@ class AttentionForward(AttentionForwardABC):
             q_prefix,
             k_prefix,
             v_prefix,
-            prefix_grouper.prefix_attn_mask.to(q_prefix.device),
+            prefix_grouper.group_info.prefix_attn_mask.to(q_prefix.device),
             *args,
             **kwargs,
         )
@@ -72,7 +72,7 @@ class AttentionForward(AttentionForwardABC):
             q_suffix,
             prefix_grouper.batch_repeat_cat(k_prefix, k_suffix, cat_dim=2),
             prefix_grouper.batch_repeat_cat(v_prefix, v_suffix, cat_dim=2),
-            prefix_grouper.suffix_attn_mask.to(q_suffix.device),
+            prefix_grouper.group_info.suffix_attn_mask.to(q_suffix.device),
             *args,
             **kwargs,
         )
