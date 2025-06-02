@@ -1,57 +1,36 @@
-from abc import ABC, abstractmethod
 import torch
-from .utils.typing import List, Optional, overload, Union, Tuple
+from .utils import batch_repeat_cat
+from .utils.typing import List, Union, Tuple
 from .function import GroupFunction, UngroupFunction
 from .forward import AttentionForward, AttnFuncType
+from .info import GroupInfo
 
-SUPPORTED_PADDING_MODES = ["left", "right"]
 UngroupedTuple = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
 SplittedOutputTuple = Tuple[torch.Tensor, torch.Tensor]
 
 
-class PrefixGrouperABC(ABC):
-    @abstractmethod
-    def precompute(self, *args, **kwargs):
-        """
-        Precompute any needed intermediate variables (e.g., attention mask, indices, etc.)
-        """
-        pass
-
-
-class PrefixGrouper(PrefixGrouperABC):
+class PrefixGrouper:
     def __init__(
         self,
         group_info: List[List[int]],
         device=None,
         padding_mode: Union[str, torch.Tensor] = "right",
     ) -> None:
-        # NOTE: The ``device`` is not assigned to ``self``, because the actual device may change
-        # among different decoder layers
-        for g in group_info:
-            assert (
-                len(g) >= 2
-            ), f"Size of each element in ``group_info`` should be greater than 2"
-        assert (
-            isinstance(padding_mode, str) and padding_mode in SUPPORTED_PADDING_MODES
-        ) or isinstance(
-            padding_mode, torch.Tensor
-        ), f"``padding_mode`` should either be a ``str`` (supported values: {SUPPORTED_PADDING_MODES}) or a ``torch.Tensor`` mask."
-        self.group_info = group_info
-        self.precompute(device, padding_mode)
+        self.group_info = GroupInfo.from_list(group_info=group_info, device=device, padding_mode=padding_mode)
 
     def get_ungroup_args(self, device=None):
         """
         Get ungroup indices and shapes.
         """
-        prefix_x_shape = self.prefix_x_shape
-        suffix_x_shape = self.suffix_x_shape
+        prefix_x_shape = self.group_info.prefix_x_shape
+        suffix_x_shape = self.group_info.suffix_x_shape
         indices = (
-            self.ungrouped_prefix_indices.to(device),
-            self.ungrouped_suffix_indices.to(device),
-            self.grouped_prefix_indices.to(device),
-            self.grouped_suffix_indices.to(device),
+            self.group_info.ungrouped_prefix_indices.to(device),
+            self.group_info.ungrouped_suffix_indices.to(device),
+            self.group_info.grouped_prefix_indices.to(device),
+            self.group_info.grouped_suffix_indices.to(device),
         )
         shapes = (prefix_x_shape, suffix_x_shape)
         return indices, shapes
@@ -89,12 +68,12 @@ class PrefixGrouper(PrefixGrouperABC):
             o_prefix,
             o_suffix,
             (
-                self.ungrouped_prefix_indices.to(o_prefix.device),
-                self.ungrouped_suffix_indices.to(o_prefix.device),
-                self.grouped_prefix_indices.to(o_prefix.device),
-                self.grouped_suffix_indices.to(o_prefix.device),
+                self.group_info.ungrouped_prefix_indices.to(o_prefix.device),
+                self.group_info.ungrouped_suffix_indices.to(o_prefix.device),
+                self.group_info.grouped_prefix_indices.to(o_prefix.device),
+                self.group_info.grouped_suffix_indices.to(o_prefix.device),
             ),
-            self.x_shape,
+            self.group_info.x_shape,
         )
 
     def split_output(
@@ -121,8 +100,8 @@ class PrefixGrouper(PrefixGrouperABC):
             suffix_output.squeeze(1),
         )
         prefix_mask, suffix_mask = (
-            self.ungrouped_prefix_mask,
-            self.ungrouped_suffix_mask,
+            self.group_info.ungrouped_prefix_mask,
+            self.group_info.ungrouped_suffix_mask,
         )
         if include_prefix_last > 0:
             suffix_output = self.batch_repeat_cat(
@@ -154,222 +133,12 @@ class PrefixGrouper(PrefixGrouperABC):
             **kwargs,
         )
 
-    def precompute(
-        self, device, padding_mode: Union[str, torch.Tensor]
-    ) -> List[torch.Tensor]:
-        """
-        Create 4 mask matrices, 4 indice matrices based on group_info.
-        """
-        prefix_elements = [g[0] for g in self.group_info]
-        suffix_elements = []
-        num_samples = []  # Save num samples in each group (for repeat interleave)
-        for g in self.group_info:
-            suffix_elements.extend(g[1:])
-            num_samples.append(len(g) - 1)
-        self.num_samples = torch.tensor(num_samples, dtype=torch.long, device=device)
-        sums = torch.tensor([sum(g) for g in self.group_info], device=device)
-        self.max_total_len: int = int(sums.max().item())
-
-        # First, process grouped masks
-        if isinstance(padding_mode, str):
-            # Calculate ``padding_delta`` for left padding
-            padding_mask = self.create_mask(
-                sums,
-                max_len=self.max_total_len,
-                seq_len=sums,
-                padding_mode=padding_mode,
-                device=device,
-            )
-        else:
-            padding_mask = padding_mode.to(device)
-        # Verify padding mask
-        assert (
-            padding_mask.ndim == 2
-        ), f"Padding mask should be a Tensor of shape [b, seq_len] (ndim == 2), got {padding_mask.shape}"
-        assert padding_mask.shape[0] == len(
-            self.group_info
-        ), f"Padding mask should be the same size as ``group_info`` at dim 0, got {padding_mask.shape[0]} and {len(self.group_info)}"
-        token_cnt = padding_mask.sum(dim=-1)
-        assert torch.all(
-            token_cnt == sums
-        ), f"Number of True values in padding mask does not match ``group_info``, got {token_cnt} and {sums}"
-        # NOTE: The ``padding_mask`` can be used as ``attention_mask`` in the model forward process.
-        self.padding_mask = padding_mask.bool()
-        # Grouped Prefix Mask [num_groups, max_total_len]
-        self.grouped_prefix_mask = self.create_submask(
-            padding_mask,
-            torch.tensor(prefix_elements, device=device),
-        ).bool()
-        # Grouped Suffix Mask [num_groups, max_total_len]
-        starts = torch.tensor(prefix_elements, device=device)
-        lengths = torch.tensor([sum(g[1:]) for g in self.group_info], device=device)
-        ends = starts + lengths
-        self.grouped_suffix_mask = self.create_submask(
-            padding_mask,
-            starts,
-            ends,
-        ).bool()
-
-        # Second, process ungrouped masks
-        # NOTE: Ungrouped prefix is always left-padding and suffix is always right-padding,
-        # because it doesn't matter whether it's left-padding or right-padding in the
-        # attention operations, so we choose to have no padding between the prefix and suffix
-        # for consistency and convenience.
-        # Ungrouped Prefix Mask [num_groups, max_prefix_len]
-        self.max_prefix_len: int = max(prefix_elements) if prefix_elements else 0
-        prefix_len = torch.tensor(prefix_elements, device=device)
-        self.ungrouped_prefix_mask = self.create_mask(
-            prefix_len,
-            max_len=self.max_prefix_len,
-            seq_len=prefix_len,
-            padding_mode="left",
-            device=device,
-        ).bool()
-        # Ungrouped Suffix Mask [num_samples, max_suffix_len]
-        self.max_suffix_len: int = max(suffix_elements) if suffix_elements else 0
-        self.ungrouped_suffix_mask = self.create_mask(
-            torch.tensor(suffix_elements, device=device),
-            max_len=self.max_suffix_len,
-            padding_mode="right",
-            device=device,
-        ).bool()
-        # Attention Mask
-        self.prefix_attn_mask = self.ungrouped_prefix_mask.bool()
-        self.suffix_attn_mask = self.batch_repeat_cat(
-            self.ungrouped_prefix_mask, self.ungrouped_suffix_mask, cat_dim=1
-        ).bool()
-        # Cache indices
-        # Tuple[batch_dim, seq_dim]
-        self.grouped_prefix_indices = self.grouped_prefix_mask.nonzero(
-            as_tuple=False
-        ).to(device)
-        self.grouped_suffix_indices = self.grouped_suffix_mask.nonzero(
-            as_tuple=False
-        ).to(device)
-        self.ungrouped_prefix_indices = self.ungrouped_prefix_mask.nonzero(
-            as_tuple=False
-        ).to(device)
-        self.ungrouped_suffix_indices = self.ungrouped_suffix_mask.nonzero(
-            as_tuple=False
-        ).to(device)
-        # Cache input shapes
-        self.x_shape = self.padding_mask.shape
-        self.prefix_x_shape = self.ungrouped_prefix_mask.shape
-        self.suffix_x_shape = self.ungrouped_suffix_mask.shape
-
     def batch_repeat_cat(
         self, prefix: torch.Tensor, suffix: torch.Tensor, cat_dim: int
     ) -> torch.Tensor:
-        """
-        Repeat the prefix tensor according to ``num_samples``, and cat it to the
-        suffix tensor. NOTE: The tensor should be batch-first.
-        """
-        return torch.cat(
-            [
-                prefix.repeat_interleave(
-                    self.num_samples.to(prefix.device), dim=0
-                ),  # batch repeat
-                suffix,
-            ],
-            dim=cat_dim,
+        return batch_repeat_cat(
+            prefix=prefix,
+            suffix=suffix,
+            cat_dim=cat_dim,
+            num_samples=self.group_info.num_samples,
         )
-
-    def _resolve_start_end(
-        self,
-        indices1: torch.Tensor,
-        indices2: Optional[torch.Tensor] = None,
-    ):
-        """
-        If ``indices2`` is ``None``, then set ``start_indices`` to 0, and
-        set ``end_indices`` to ``indices1``.
-        """
-        if indices2 is not None:
-            start_indices = indices1
-            end_indices = indices2
-        else:
-            start_indices = torch.zeros_like(indices1)
-            end_indices = indices1
-        return start_indices, end_indices
-
-    @overload
-    def create_mask(
-        self,
-        end_indices: torch.Tensor,
-        *,
-        max_len: int,
-        seq_len: Optional[torch.Tensor] = None,
-        padding_mode: str = "right",
-        device: torch.device = None,
-    ) -> torch.Tensor: ...
-    @overload
-    def create_mask(
-        self,
-        start_indices: torch.Tensor,
-        end_indices: torch.Tensor,
-        *,
-        max_len: int,
-        seq_len: Optional[torch.Tensor] = None,
-        padding_mode: str = "right",
-        device: torch.device = None,
-    ) -> torch.Tensor: ...
-    def create_mask(
-        self,
-        indices1: torch.Tensor,
-        indices2: Optional[torch.Tensor] = None,
-        *,
-        max_len: int,
-        seq_len: Optional[torch.Tensor] = None,
-        padding_mode: str = "right",
-        device: torch.device = None,
-    ) -> torch.Tensor:
-        """
-        create mask based on padding mode
-        """
-        start_indices, end_indices = self._resolve_start_end(
-            indices1=indices1, indices2=indices2
-        )
-        if padding_mode == "left":
-            if seq_len is None:
-                raise ValueError(
-                    "``seq_len`` cannot be ``None`` when ``padding_mode`` is left"
-                )
-            padding_delta = max_len - seq_len
-            start_indices = start_indices + padding_delta
-            end_indices = end_indices + padding_delta
-        positions = torch.arange(max_len, device=device)
-        mask = (positions < end_indices.unsqueeze(-1)) & (
-            positions >= start_indices.unsqueeze(-1)
-        )
-        return mask.int()
-
-    @overload
-    def create_submask(
-        self,
-        mask: torch.Tensor,
-        end_indices: torch.Tensor,
-    ) -> torch.Tensor: ...
-    @overload
-    def create_submask(
-        self,
-        mask: torch.Tensor,
-        start_indices: torch.Tensor,
-        end_indices: torch.Tensor,
-    ) -> torch.Tensor: ...
-    def create_submask(
-        self,
-        mask: torch.Tensor,
-        indices1: torch.Tensor,
-        indices2: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        """
-        Create submask based on the given mask and indices.
-        """
-        start_indices, end_indices = self._resolve_start_end(
-            indices1=indices1, indices2=indices2
-        )
-        counts = mask.long().cumsum(dim=1)
-        index_tensor = torch.where(mask, counts - 1, torch.full_like(counts, -1))
-        start_expanded = start_indices.unsqueeze(-1)
-        end_expanded = end_indices.unsqueeze(-1)
-        new_mask = (index_tensor >= start_expanded) & (index_tensor < end_expanded)
-        return new_mask

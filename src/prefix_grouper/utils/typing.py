@@ -10,6 +10,7 @@ if sys.version_info < (3, 8):
         from typing_extensions import (
             Literal,
             Protocol,
+            SupportsIndex,
         )
     except Exception:
         print(
@@ -28,4 +29,8 @@ if sys.version_info >= (3, 9):
         type as Type,
         # for compatibility for Python 2.x
         str as Text,
+    )
+    
+    from collections.abc import (
+        Sequence as Sequence
     )
