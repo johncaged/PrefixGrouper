@@ -26,7 +26,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -43,6 +43,11 @@ from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_u
 from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, replace_return_docstrings
 from transformers.models.qwen2_5_vl.configuration_qwen2_5_vl import Qwen2_5_VLConfig, Qwen2_5_VLVisionConfig
+if TYPE_CHECKING:
+    try:
+        from prefix_grouper import PrefixGrouper
+    except ImportError:
+        pass
 
 
 if is_flash_attn_available():
@@ -793,7 +798,7 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
         use_cache: bool = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        prefix_grouper=None,
+        prefix_grouper: Optional["PrefixGrouper"] = None,
     ):
         bsz, q_len, _ = hidden_states.size()
 
@@ -1025,7 +1030,7 @@ class Qwen2_5_VLDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
-        prefix_grouper=None,
+        prefix_grouper: Optional["PrefixGrouper"] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -1125,7 +1130,7 @@ class Qwen2_5_VLModel(Qwen2_5_VLPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        prefix_grouper=None,
+        prefix_grouper: Optional["PrefixGrouper"] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -1542,7 +1547,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         video_grid_thw: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        prefix_grouper=None,
+        prefix_grouper: Optional["PrefixGrouper"] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Calculate the 3D rope index based on image and video's temporal, height and width in LLM.
@@ -1683,12 +1688,12 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                     st = ed + llm_grid_t * llm_grid_h * llm_grid_w
 
                 if prefix_grouper is not None:
-                    if st < prefix_grouper.group_info[i][0]:
+                    if st < prefix_grouper.group_info[i].prefix_len:
                         st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
-                        text_len = prefix_grouper.group_info[i][0] - st
+                        text_len = prefix_grouper.group_info[i].prefix_len - st
                         llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
                         st_idx = st_idx + text_len
-                        for suffix_len in prefix_grouper.group_info[i][1:]:
+                        for suffix_len in prefix_grouper.group_info[i].suffix_lens:
                             llm_pos_ids_list.append(torch.arange(suffix_len).view(1, -1).expand(3, -1) + st_idx)        
                 else:
                     if st < len(input_tokens):
@@ -1743,7 +1748,7 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
         rope_deltas: Optional[torch.LongTensor] = None,
         cache_position: Optional[torch.LongTensor] = None,
         second_per_grid_ts: Optional[torch.Tensor] = None,
-        prefix_grouper=None,
+        prefix_grouper: Optional["PrefixGrouper"] = None,
     ) -> Union[Tuple, Qwen2_5_VLCausalLMOutputWithPast]:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
