@@ -52,7 +52,9 @@ def create_mask(
     """
     create mask based on padding mode
     """
-    assert padding_mode in SUPPORTED_PADDING_MODES, f"Supported padding modes: {SUPPORTED_PADDING_MODES}, but got {padding_mode}"
+    assert (
+        padding_mode in SUPPORTED_PADDING_MODES
+    ), f"Supported padding modes: {SUPPORTED_PADDING_MODES}, but got {padding_mode}"
     start_indices, end_indices = _resolve_start_end(
         indices1=indices1, indices2=indices2
     )
@@ -108,7 +110,7 @@ def create_padding_mask(
     device,
 ) -> torch.Tensor:
     """
-    Create and verify padding masks. ``True`` represents non-padding tokens, while ``False`` 
+    Create and verify padding masks. ``True`` represents non-padding tokens, while ``False``
     represents padding tokens.
     """
     assert (

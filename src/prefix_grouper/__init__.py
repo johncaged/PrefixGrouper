@@ -18,7 +18,9 @@ class PrefixGrouper:
         device=None,
         padding_mode: Union[str, torch.Tensor] = "right",
     ) -> None:
-        self.group_info = GroupInfo.from_list(group_info=group_info, device=device, padding_mode=padding_mode)
+        self.group_info = GroupInfo.from_list(
+            group_info=group_info, device=device, padding_mode=padding_mode
+        )
 
     def get_ungroup_args(self, device=None):
         """
@@ -85,15 +87,23 @@ class PrefixGrouper:
         suffix_mask: torch.Tensor,
     ):
         """
-        Concatenate the prefix and suffix inputs into grouped inputs based on the given masks 
+        Concatenate the prefix and suffix inputs into grouped inputs based on the given masks
         and ``group_info``.
-        
+
         Input: prefix, suffix tensors in the shape of [b, seq, ...]
+
+        Output: input tensor in the shape of [b, seq, ...]
         """
+        assert prefix.ndim == suffix.ndim
+        assert (
+            prefix.ndim == 2 or prefix.ndim == 3
+        ), f"Can only accept input shape of [b, seq] or [b, seq, dim], got {prefix.shape}"
+
         device = prefix.device
-        return GroupFunction.apply(
-            prefix,
-            suffix,
+        input_: torch.Tensor = GroupFunction.apply(
+            # NOTE: unsqueeze to 4d to fit the group function
+            prefix.reshape(*prefix.shape, *((1,) * (4 - prefix.ndim))),
+            suffix.reshape(*suffix.shape, *((1,) * (4 - suffix.ndim))),
             (
                 prefix_mask.nonzero(as_tuple=False).to(device),
                 suffix_mask.nonzero(as_tuple=False).to(device),
@@ -102,6 +112,7 @@ class PrefixGrouper:
             ),
             self.group_info.x_shape,
         )
+        return input_.reshape(*(input_.shape[: prefix.ndim]))
 
     def split_output(
         self,
@@ -116,9 +127,12 @@ class PrefixGrouper:
         Output: prefix, suffix tensors in the shape of [b, seq, dim]
         """
         assert include_prefix_last >= 0
+        assert (
+            output.ndim == 3
+        ), f"``output`` should be in the shape of [b, seq, dim], got {output.shape}"
         indices, shapes = self.get_ungroup_args(output.device)
         prefix_output, suffix_output = UngroupFunction.apply(
-            output.unsqueeze(1),  # NOTE: unsqueeze to fit the ungroup function
+            output.unsqueeze(1),  # NOTE: unsqueeze to 4d to fit the ungroup function
             indices,
             shapes,
         )
@@ -169,7 +183,7 @@ class PrefixGrouper:
             cat_dim=cat_dim,
             num_samples=self.group_info.num_samples,
         )
-    
+
     def __getattr__(self, name: str):
         # NOTE: For backward compatibility
         return getattr(self.group_info, name)

@@ -10,7 +10,7 @@ class UngroupFunction(Function):
     @staticmethod
     def forward(
         ctx,
-        x: torch.Tensor,  # Shape: [b, num_heads, seq, head_dim]
+        x: torch.Tensor,  # NOTE: Shape: [b, num_heads, seq, head_dim]
         indices: tuple,  # 4 non-zero mask indices
         shapes: tuple,  # shapes of ungrouped prefix and ungrouped suffix
     ):

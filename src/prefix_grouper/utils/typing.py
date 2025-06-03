@@ -30,7 +30,5 @@ if sys.version_info >= (3, 9):
         # for compatibility for Python 2.x
         str as Text,
     )
-    
-    from collections.abc import (
-        Sequence as Sequence
-    )
+
+    from collections.abc import Sequence as Sequence
