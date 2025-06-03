@@ -23,7 +23,10 @@ pip install prefix_grouper
 
 ## 快速上手
 
-为了让 ``PrefixGrouper`` 更简单易用，我们在 examples 中提供了部分模型的修改示例。
+为了让 ``PrefixGrouper`` 更简单易用，我们提供了部分模型的修改示例。
+
+- 模型文件修改示例请查看 ``examples``。为了更清晰，我们在关键修改部分采用 "PrefixGrouper Start" 和 "PrefixGrouper End" 注释包裹。
+- 模拟整体训练流程的示例请查看 ``tests/equivalence``。我们提供一个训练 step 的几乎完整的流程。
 
 如果你恰好需要使用示例中的模型进行训练，那么可以直接将示例中的代码引入到你的代码库。然而，我们还是建议你简单了解一下 ``PrefixGrouper`` 的使用教程，以更清楚地了解该工具的运行流程。
 

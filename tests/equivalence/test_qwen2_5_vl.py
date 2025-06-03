@@ -352,6 +352,8 @@ def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
     processor = AutoProcessor.from_pretrained(model_path)
     data = ["video1", "video2"]
     # Run forward and backward for compare
+    # NOTE: The three methods use the same ``load_input_data`` function, which means this part is totally 
+    # the same among these methods, and all we should focus on is the ``forward_backward_xxx`` function.
     # Baseline method
     outputs, grads = forward_backward_base(**load_input_data(model_path, processor, device, data))
     empty_cache_func()

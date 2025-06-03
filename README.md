@@ -23,7 +23,10 @@ pip install prefix_grouper
 
 ## Quick Start
 
-To ensure ``PrefixGrouper`` is user-friendly, we provide modification examples for several models in the `examples` directory.
+To make ``PrefixGrouper`` simpler and easier to use, we provide modification examples for some models.
+
+- Model file modification examples can be found in ``examples``. For clarity, we wrap key modifications with "PrefixGrouper Start" and "PrefixGrouper End" comments.
+- For examples simulating the full training workflow, see ``tests/equivalence``. We provide an almost complete flow for one training step.
 
 If you happen to use one of these models, you can directly integrate the example code into your codebase. However, we recommend briefly reviewing the tutorial below to better understand the tool's workflow.
 
