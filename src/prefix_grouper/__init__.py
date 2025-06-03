@@ -1,3 +1,8 @@
+try:
+    from .__version__ import __version__
+except Exception:
+    print("__version__ load failed.")
+
 import torch
 from .utils import batch_repeat_cat
 from .utils.typing import List, Union, Tuple

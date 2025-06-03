@@ -1,8 +1,19 @@
 # PrefixGrouper
 
+<h4 align="center">
+    <p>
+        <b>English</b> |
+        <a href="./i18n/README_zh-hans.md">简体中文</a>
+    </p>
+</h4>
+
 ``PrefixGrouper`` is a plug-and-play efficient GRPO training tool that requires minimal modifications to existing codebases to achieve reduced computation, lower VRAM consumption, and accelerated training. Additionally, this tool can be applied to other scenarios requiring shared-prefix training/inference beyond GRPO.
 
 In current mainstream GRPO training pipelines, policy model training primarily involves copying prefixes (typically questions, multimodal inputs, etc.) `G` times. Consequently, when training data prefixes are sufficiently long (e.g., long-context reasoning, image/long-video inference), redundant computation during training becomes non-negligible, leading to increased VRAM usage, higher computation costs, and slower training speeds. To address this, we propose ``PrefixGrouper``, a plug-and-play GRPO training tool that enables efficient training through shared-prefix forward passes. Reduced VRAM consumption conversely allows more GPUs to support larger group sizes—critical for GRPO algorithms.
+
+## News
+
+- [2025/6/3] We release ``PrefixGrouper``. Tech report is coming, please stay tuned.
 
 ## Installation
 

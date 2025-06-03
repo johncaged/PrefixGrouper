@@ -4,7 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefix_grouper"
-version = "0.0.0"
+version = "0.0.0a1"
+description = "An efficient GRPO training util."
+readme = "README.md"
+authors = [{ name = "Zikang Liu", email = "liuzikang0625@gmail.com" }]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/johncaged/PrefixGrouper"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
