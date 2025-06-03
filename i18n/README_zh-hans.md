@@ -168,10 +168,16 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=padding_mask)
 ``output``：shape 为 [b, seq_len, dim]
 ``include_prefix_last``：将前缀最后的 n 个 token 转换为共享的后缀 token，为 0 时则代表不转换（详见使用教程的数据输入输出部分）。
 
-## 数据许可
+## 数据使用声明
 
-本项目中使用的测试数据仅为研究用途，非商业盈利场景。
+本项目使用的测试数据仅用于**学术研究目的**，具有以下严格限制：
+
+1. **禁止任何形式的商业用途**
+
+2. **禁止数据重新分发**
+
+3. **禁止尝试去匿名化操作**
 
 ## 引用
 
-
+[TODO]
