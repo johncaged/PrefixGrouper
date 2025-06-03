@@ -23,11 +23,11 @@ class AttentionForwardABC(ABC):
     @abstractmethod
     def __call__(
         self,
+        prefix_grouper: "PrefixGrouper",
         q: torch.Tensor,
         k: torch.Tensor,
         v: torch.Tensor,
         *args,
-        prefix_grouper: "PrefixGrouper",
         **kwargs,
     ) -> torch.Tensor:
         """

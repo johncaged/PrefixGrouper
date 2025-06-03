@@ -863,6 +863,7 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
             sliding_window = None
 
         if prefix_grouper is None:
+            # The common flash attention forward
             attn_output = _flash_attention_forward(
                 query_states,
                 key_states,
@@ -875,7 +876,10 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
                 use_top_left_mask=self._flash_attn_uses_top_left_mask,
             )
         else:
+            # ===== PrefixGrouper Start =====
             def attn_func(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attn_mask: torch.Tensor, *args, **kwargs):
+                # NOTE: We use ``attn_func`` as an adapter to automatically add a ``q_len`` parameter (q.size(2)) and
+                # transpose q, k, v
                 return _flash_attention_forward(
                     q.transpose(1, 2),
                     k.transpose(1, 2),
@@ -886,6 +890,7 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
                     **kwargs,
                 )
             
+            # NOTE: apply attention operation using ``prefix_grouper``
             attn_output = prefix_grouper.forward(
                 attn_func,
                 query_states.transpose(1, 2),
@@ -896,6 +901,7 @@ class Qwen2_5_VLFlashAttention2(Qwen2_5_VLAttention):
                 is_causal=self.is_causal,
                 use_top_left_mask=self._flash_attn_uses_top_left_mask,
             )
+            # ====== PrefixGrouper End ======
 
         attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
         attn_output = self.o_proj(attn_output)
@@ -1688,13 +1694,18 @@ class Qwen2_5_VLForConditionalGeneration(Qwen2_5_VLPreTrainedModel, GenerationMi
                     st = ed + llm_grid_t * llm_grid_h * llm_grid_w
 
                 if prefix_grouper is not None:
+                    # ===== PrefixGrouper Start =====
+                    st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
+                    # NOTE: Here we add the remaining text positions in the prefix (if exists)
                     if st < prefix_grouper.group_info[i].prefix_len:
-                        st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0
                         text_len = prefix_grouper.group_info[i].prefix_len - st
                         llm_pos_ids_list.append(torch.arange(text_len).view(1, -1).expand(3, -1) + st_idx)
                         st_idx = st_idx + text_len
-                        for suffix_len in prefix_grouper.group_info[i].suffix_lens:
-                            llm_pos_ids_list.append(torch.arange(suffix_len).view(1, -1).expand(3, -1) + st_idx)        
+                    # NOTE: Here we add suffix text positions
+                    # NOTE: The position ids in each suffix rollout should start from the same ``st_idx``
+                    for suffix_len in prefix_grouper.group_info[i].suffix_lens:
+                        llm_pos_ids_list.append(torch.arange(suffix_len).view(1, -1).expand(3, -1) + st_idx)
+                    # ====== PrefixGrouper End ======
                 else:
                     if st < len(input_tokens):
                         st_idx = llm_pos_ids_list[-1].max() + 1 if len(llm_pos_ids_list) > 0 else 0

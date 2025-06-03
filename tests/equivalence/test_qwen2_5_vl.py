@@ -352,10 +352,13 @@ def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
     processor = AutoProcessor.from_pretrained(model_path)
     data = ["video1", "video2"]
     # Run forward and backward for compare
+    # Baseline method
     outputs, grads = forward_backward_base(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
+    # PrefixGrouper with separate last prefix token
     outputs2, grads2 = forward_backward_prefix_grouper(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
+    # PrefixGrouper with shared last prefix token
     outputs3, grads3 = forward_backward_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
     breakpoint()
