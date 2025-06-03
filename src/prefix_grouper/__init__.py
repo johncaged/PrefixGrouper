@@ -92,9 +92,8 @@ class PrefixGrouper:
         """
         device = prefix.device
         return GroupFunction.apply(
-            # NOTE: unsqueeze to fit the group function
-            prefix.unsqueeze(1),
-            suffix.unsqueeze(1),
+            prefix,
+            suffix,
             (
                 prefix_mask.nonzero(as_tuple=False).to(device),
                 suffix_mask.nonzero(as_tuple=False).to(device),
