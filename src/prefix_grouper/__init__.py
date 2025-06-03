@@ -64,14 +64,42 @@ class PrefixGrouper:
 
         NOTE: You should carefully check the input and output shapes.
         """
+        device = o_prefix.device
         return GroupFunction.apply(
             o_prefix,
             o_suffix,
             (
-                self.group_info.ungrouped_prefix_indices.to(o_prefix.device),
-                self.group_info.ungrouped_suffix_indices.to(o_prefix.device),
-                self.group_info.grouped_prefix_indices.to(o_prefix.device),
-                self.group_info.grouped_suffix_indices.to(o_prefix.device),
+                self.group_info.ungrouped_prefix_indices.to(device),
+                self.group_info.ungrouped_suffix_indices.to(device),
+                self.group_info.grouped_prefix_indices.to(device),
+                self.group_info.grouped_suffix_indices.to(device),
+            ),
+            self.group_info.x_shape,
+        )
+
+    def concat_input(
+        self,
+        prefix: torch.Tensor,
+        prefix_mask: torch.Tensor,
+        suffix: torch.Tensor,
+        suffix_mask: torch.Tensor,
+    ):
+        """
+        Concatenate the prefix and suffix inputs into grouped inputs based on the given masks 
+        and ``group_info``.
+        
+        Input: prefix, suffix tensors in the shape of [b, seq, ...]
+        """
+        device = prefix.device
+        return GroupFunction.apply(
+            # NOTE: unsqueeze to fit the group function
+            prefix.unsqueeze(1),
+            suffix.unsqueeze(1),
+            (
+                prefix_mask.nonzero(as_tuple=False).to(device),
+                suffix_mask.nonzero(as_tuple=False).to(device),
+                self.group_info.grouped_prefix_indices.to(device),
+                self.group_info.grouped_suffix_indices.to(device),
             ),
             self.group_info.x_shape,
         )
