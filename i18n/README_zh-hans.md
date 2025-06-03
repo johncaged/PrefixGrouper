@@ -2,7 +2,7 @@
 
 <h4 align="center">
     <p>
-        <a href="../README.md">English</a> |
+        <a href="https://github.com/johncaged/PrefixGrouper">English</a> |
         <b>简体中文</b>
     </p>
 </h4>

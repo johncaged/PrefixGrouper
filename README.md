@@ -3,7 +3,7 @@
 <h4 align="center">
     <p>
         <b>English</b> |
-        <a href="./i18n/README_zh-hans.md">简体中文</a>
+        <a href="https://github.com/johncaged/PrefixGrouper/blob/main/i18n/README_zh-hans.md">简体中文</a>
     </p>
 </h4>
 
