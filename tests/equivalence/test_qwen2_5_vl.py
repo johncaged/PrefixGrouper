@@ -64,7 +64,7 @@ def process_inputs(processor, videos, instructions, device):
         videos=videos,
         return_tensors="pt",
         padding=True,
-        padding_side="right",
+        padding_side="left",
         add_special_tokens=False,
         fps=1.0,
     )
@@ -95,7 +95,7 @@ def batch_repeat_interleave(lst, repeats):
 
 def get_grad(model):
     return {
-        name: param.grad.clone()
+        name: param.grad.clone().cpu()
         for name, param in model.named_parameters()
         if param.grad is not None
     }
@@ -154,20 +154,16 @@ def forward_backward_base(
     )
     res = model(**prompt_inputs, use_cache=False)
     # Calculate loss and backward
-    resp_ids = resp_inputs["input_ids"]
-    resp_mask = resp_inputs["attention_mask"]
-    prompt_mask_cumsum = prompt_mask.cumsum(dim=1)
-    prompt_mask = (prompt_mask_cumsum == prompt_mask_cumsum.max(dim=1).values.unsqueeze(1)) & prompt_mask
-    output_mask = torch.cat([prompt_mask, resp_mask.to(device)], dim=1).bool()
-    loss_mask = output_mask[:, :-1]
-    logits = res.logits[:, :-1]
-    targets = prompt_inputs["input_ids"][:, 1:]
-    loss = (logits.gather(-1, targets.unsqueeze(-1)).squeeze(-1) - logits.logsumexp(-1)).exp()
-    loss = loss * loss_mask
-    loss = (loss.sum(-1) / loss_mask.sum(-1)).mean()
-    (-loss).backward()
+    resp_ids = resp_inputs["input_ids"].to(device)
+    resp_mask = resp_inputs["attention_mask"].to(device)
+    logits = res.logits[:, prompt_ids.shape[1] - 1: -1].float()
+    loss = (logits.gather(-1, resp_ids.unsqueeze(-1)).squeeze(-1) - logits.logsumexp(-1)).exp()
+    loss = loss * resp_mask
+    loss = (loss.sum(-1) / resp_mask.sum(-1)).mean()
+    if loss.requires_grad:
+        (-loss).backward()
     return (
-        [output[mask] for output, mask in zip(res.logits, output_mask)],
+        [output[mask.bool()] for output, mask in zip(logits, resp_mask)],
         get_grad(model)
     )
 
@@ -206,56 +202,41 @@ def forward_backward_prefix_grouper(
     prefix_lens = prompt_mask.sum(dim=1).tolist()
     # NOTE: Suppose we have got the final responses by the model here
     responses = [[suffix_start_str + r for r in resps] for resps in responses]
-    resp_ids_list = [
-        [
-            torch.tensor(
-                processor.tokenizer(r).input_ids,
-                dtype=torch.long,
-                device=device,
-            )
-            for r in resps
-        ]
-        for resps in responses
-    ]
-    group_info = [
-        [p_len, *(r.shape[0] for r in r_list)]
-        for p_len, r_list in zip(prefix_lens, resp_ids_list)
-    ]
-    # NOTE: We should concat the input ids manually rather than concat the str first then
-    # use processor, because concatenating different suffixes head to tail will cause
-    # tokenize ids to merge
-    final_input_ids = [
-        torch.cat([prompt_ids_, *r_list])
-        for prompt_ids_, r_list in zip(prompt_ids, resp_ids_list)
-    ]
-    prompt_inputs["input_ids"] = torch.nn.utils.rnn.pad_sequence(
-        final_input_ids,
-        batch_first=True,
-        padding_value=processor.tokenizer.pad_token_id,
+    suffix_inputs = processor(
+        text=[r for resps in responses for r in resps],
+        return_tensors="pt",
+        padding=True,
         padding_side="right",
+        add_special_tokens=False,
     )
-    prompt_inputs["attention_mask"] = (
-        prompt_inputs["input_ids"] != processor.tokenizer.pad_token_id
-    )
+    suffix_ids = suffix_inputs["input_ids"].to(device)
+    suffix_mask = suffix_inputs["attention_mask"].to(device)
+    suffix_lens = suffix_mask.sum(-1)
+    lengths = [len(resps) for resps in responses]
+    suffix_lens = [
+        [int(t.item()) for t in chunk]
+        for chunk in torch.split(suffix_lens, lengths, dim=0)
+    ]
+    group_info = [[p_len, *s_lens] for p_len, s_lens in zip(prefix_lens, suffix_lens)]
     prefix_grouper = PrefixGrouper(
         group_info=group_info,
-        padding_mode=prompt_inputs["attention_mask"],
+        padding_mode="right",
         device=device,
     )
+    prompt_inputs["input_ids"] = prefix_grouper.concat_input(prompt_ids, prompt_mask, suffix_ids, suffix_mask)
+    prompt_inputs["attention_mask"] = prefix_grouper.padding_mask
     res = model(**prompt_inputs, use_cache=False, prefix_grouper=prefix_grouper)
     # Calculate loss and backward
     prefix_output, prefix_mask, suffix_output, suffix_mask = (
         prefix_grouper.split_output(res.logits)
     )
-    resp_ids_list = [r for r_list in resp_ids_list for r in r_list]
-    loss_list = []
-    for resp_ids, output, mask in zip(resp_ids_list, suffix_output, suffix_mask):
-        output = output[mask][:-1]
-        logps = output.gather(-1, resp_ids.unsqueeze(-1)[1:]).squeeze(-1) - output.logsumexp(-1)
-        loss_list.append(logps.exp().mean())
-    loss = -torch.stack(loss_list).mean()
-    loss.backward()
-
+    suffix_output = suffix_output[:, :-1].float()
+    suffix_mask = suffix_mask[:, 1:]
+    loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)[:, 1:]).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
+    loss = loss * suffix_mask
+    loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
+    if loss.requires_grad:
+        (-loss).backward()
     return (
         [out[mask] for out, mask in zip(suffix_output, suffix_mask)],
         get_grad(model),
@@ -289,68 +270,50 @@ def forward_backward_prefix_grouper_include_last(
 
     prefix_lens = prompt_mask.sum(dim=1).tolist()
     # NOTE: Suppose we have got the final responses by the model here
-    resp_ids_list = [
-        [
-            torch.tensor(
-                processor.tokenizer(r).input_ids,
-                dtype=torch.long,
-                device=device,
-            )
-            for r in resps
-        ]
-        for resps in responses
-    ]
-    group_info = [
-        [p_len, *(r.shape[0] for r in r_list)]
-        for p_len, r_list in zip(prefix_lens, resp_ids_list)
-    ]
-    # NOTE: We should concat the input ids manually rather than concat the str first then
-    # use processor, because concatenating different suffixes head to tail will cause
-    # tokenize ids to merge
-    final_input_ids = [
-        torch.cat([prompt_ids_, *r_list])
-        for prompt_ids_, r_list in zip(prompt_ids, resp_ids_list)
-    ]
-    prompt_inputs["input_ids"] = torch.nn.utils.rnn.pad_sequence(
-        final_input_ids,
-        batch_first=True,
-        padding_value=processor.tokenizer.pad_token_id,
+    suffix_inputs = processor(
+        text=[r for resps in responses for r in resps],
+        return_tensors="pt",
+        padding=True,
         padding_side="right",
+        add_special_tokens=False,
     )
-    prompt_inputs["attention_mask"] = (
-        prompt_inputs["input_ids"] != processor.tokenizer.pad_token_id
-    )
+    suffix_ids = suffix_inputs["input_ids"].to(device)
+    suffix_mask = suffix_inputs["attention_mask"].to(device)
+    suffix_lens = suffix_mask.sum(-1)
+    lengths = [len(resps) for resps in responses]
+    suffix_lens = [
+        [int(t.item()) for t in chunk]
+        for chunk in torch.split(suffix_lens, lengths, dim=0)
+    ]
+    group_info = [[p_len, *s_lens] for p_len, s_lens in zip(prefix_lens, suffix_lens)]
     prefix_grouper = PrefixGrouper(
         group_info=group_info,
-        padding_mode=prompt_inputs["attention_mask"],
+        padding_mode="right",
         device=device,
     )
+    prompt_inputs["input_ids"] = prefix_grouper.concat_input(prompt_ids, prompt_mask, suffix_ids, suffix_mask)
+    prompt_inputs["attention_mask"] = prefix_grouper.padding_mask
     res = model(**prompt_inputs, use_cache=False, prefix_grouper=prefix_grouper)
     # Calculate loss and backward
     # NOTE: The last token of the prefix should be changed to the first input token of the suffix
+    # NOTE: The new ``suffix_mask`` will include the last prefix token at the start
     prefix_output, prefix_mask, suffix_output, suffix_mask = (
         prefix_grouper.split_output(res.logits, include_prefix_last=1)
     )
-    resp_ids_list = [r for r_list in resp_ids_list for r in r_list]
-    loss_list = []
-    for resp_ids, output, mask in zip(resp_ids_list, suffix_output, suffix_mask):
-        output = output[mask][:-1]
-        logps = output.gather(-1, resp_ids.unsqueeze(-1)).squeeze(-1) - output.logsumexp(-1)
-        loss_list.append(logps.exp().mean())
-    loss = -torch.stack(loss_list).mean()
-    loss.backward()
-
+    suffix_output = suffix_output[:, :-1].float()
+    suffix_mask = suffix_mask[:, 1:]
+    loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
+    loss = loss * suffix_mask
+    loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
+    if loss.requires_grad:
+        (-loss).backward()
     return (
         [out[mask] for out, mask in zip(suffix_output, suffix_mask)],
         get_grad(model),
     )
 
 
-def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
-    # -------------- Shared Code between baseline and PrefixGrouper --------------
-    processor = AutoProcessor.from_pretrained(model_path)
-    # Load data here
-    data = ["video1", "video2"]
+def load_input_data(model_path, processor, device, data: list):
     video_base_dir = "./tests/test_inputs/videos"
     text_base_dir = "./tests/test_inputs/captions"
     videos = []
@@ -382,14 +345,20 @@ def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
         ),
         device=device,
     )
-    # ------------------------- Shared Code End ----------------------------------
+    return forward_kwargs
+
+
+def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
+    processor = AutoProcessor.from_pretrained(model_path)
+    data = ["video1", "video2"]
     # Run forward and backward for compare
-    outputs, grads = forward_backward_base(**forward_kwargs)
+    outputs, grads = forward_backward_base(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
-    outputs2, grads2 = forward_backward_prefix_grouper(**forward_kwargs)
+    outputs2, grads2 = forward_backward_prefix_grouper(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
-    outputs3, grads3 = forward_backward_prefix_grouper_include_last(**forward_kwargs)
+    outputs3, grads3 = forward_backward_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
+    breakpoint()
 
 
 def test_cuda(model_path: str):
@@ -401,4 +370,4 @@ def test_npu(model_path: str):
 
 
 if __name__ == "__main__":
-    test_cuda("/public/jtma/weights/Qwen2.5-VL-3B-Instruct")
+    test_cuda("your_model_path_here")
