@@ -1,4 +1,6 @@
-# PrefixGrouper
+<h3 align="center">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/logo.png" width="352" style="max-width: 100%;">
+</h3>
 
 <h4 align="center">
     <p>
@@ -7,6 +9,10 @@
     </p>
 </h4>
 
+<h3 align="center">
+    <p>Efficient GRPO training through shared-prefix forward</p>
+</h3>
+
 ``PrefixGrouper`` is a plug-and-play efficient GRPO training tool that requires minimal modifications to existing codebases to achieve reduced computation, lower VRAM consumption, and accelerated training. Additionally, this tool can be applied to other scenarios requiring shared-prefix training/inference beyond GRPO.
 
 In current mainstream GRPO training pipelines, policy model training primarily involves copying prefixes (typically questions, multimodal inputs, etc.) `G` times. Consequently, when training data prefixes are sufficiently long (e.g., long-context reasoning, image/long-video inference), redundant computation during training becomes non-negligible, leading to increased VRAM usage, higher computation costs, and slower training speeds. To address this, we propose ``PrefixGrouper``, a plug-and-play GRPO training tool that enables efficient training through shared-prefix forward passes. Reduced VRAM consumption conversely allows more GPUs to support larger group sizes—critical for GRPO algorithms.
@@ -14,6 +20,16 @@ In current mainstream GRPO training pipelines, policy model training primarily i
 ## News
 
 **[2025/6/3]** We release ``PrefixGrouper``. Tech report is coming, please stay tuned.
+
+## Method Overview
+
+The core of ``PrefixGrouper`` lies in its attention operation design:
+
+<h3 align="center">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/method.jpg">
+</h3>
+
+By decomposing the original redundant self-attention operation into prefix self-attention + suffix concat-attention, ``PrefixGrouper`` enables efficient GRPO training and is theoretically compatible with various attention implementations (``EagerAttention``, ``FlashAttention``, ``SDPA``, etc.).
 
 ## Installation
 
@@ -122,11 +138,11 @@ Core API documentation:
 
 #### PrefixGrouper(Optional[List[List[int]]] = None, device=None, padding_mode: Union[str, torch.Tensor] = "right")
 
-`group_info`: Outer list: sample count (b). Inner lists: [prefix_len, suffix1_len, suffix2_len,...]. This parameter can be ``None``, in which case you need to manually call ``init`` (same signature as ``PrefixGrouper.__init__``) to implement delay initialization.
+`group_info`: Outer list: sample count (b). Inner lists: ``[prefix_len, suffix1_len, suffix2_len,...]``. This parameter can be ``None``, in which case you need to manually call ``init`` (same signature as ``PrefixGrouper.__init__``) to implement delay initialization.
 
 `device`: Device for initializing PrefixGrouper (actual ops use input tensor's device).
 
-`padding_mode`: `"left"`/`"right"` (dense padding) or `torch.Tensor` (custom padding mask, shape [b, seq_len]).
+`padding_mode`: `"left"`/`"right"` (dense padding) or `torch.Tensor` (custom padding mask, shape ``[b, seq_len]``).
 
 Usage examples:
 - With `concat_input` (recommended):
@@ -140,15 +156,16 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=custom_padding_mask)
 
 #### PrefixGrouper.concat_input(self, prefix: torch.Tensor, prefix_mask: torch.Tensor, suffix: torch.Tensor, suffix_mask: torch.Tensor)
 
-Concatenates `prefix` ([b, seq_len] or [b, seq_len, dim]) and `suffix` ([b*group_size, seq_len] or [b*group_size, seq_len, dim]) using `group_info`. Requires `prefix_mask`/`suffix_mask` (shape [b, seq_len]).
+Concatenates `prefix` (``[b, seq_len]`` or ``[b, seq_len, dim]``) and `suffix` (``[b * group_size, seq_len]`` or ``[b * group_size, seq_len, dim]``) using `group_info`. Requires `prefix_mask`/`suffix_mask` (shape ``[b, seq_len]``).
 
 #### PrefixGrouper.forward(self, __attn_func: AttnFuncType, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *args, **kwargs)
 
-Performs attention using `__attn_func`. Function signature: `attn_func(q, k, v, attn_mask, *args, **kwargs)`. Input `q/k/v` shape: [b, num_heads, seq_len, head_dim]. Output shape: [b, seq_len, num_heads, head_dim]. **Do not manually pass attention masks.**
+Performs attention using `__attn_func`. Function signature: `attn_func(q, k, v, attn_mask, *args, **kwargs)`. Input `q/k/v` shape: ``[b, num_heads, seq_len, head_dim]``. Output shape: ``[b, seq_len, num_heads, head_dim]``. **Do not manually pass attention masks.**
 
 #### PrefixGrouper.split_output(self, output: torch.Tensor, include_prefix_last: int = 0)
 
-`output`: Shape [b, seq_len, dim]
+`output`: Shape ``[b, seq_len, dim]``
+
 `include_prefix_last`: Controls prefix boundary handling (0: no conversion; 1: attach last prefix token to suffixes).
 
 ## Future Plans
@@ -156,6 +173,7 @@ Performs attention using `__attn_func`. Function signature: `attn_func(q, k, v, 
 - [ ] Hugging Face Transformers ``AttentionInterface`` Integration (This feature is currently in testing)
 - [ ] Additional Training Device Support (``NPU`` under testing - no compatibility issues found so far)
 - [ ] Test Cases for More Models (We plan to release plain-text test cases for ``Qwen2.5`` and ``Qwen3`` models)
+- [ ] Support for other attention implementations (``EagerAttention``, ``SDPA``)
 
 ## Data Usage Statement
 

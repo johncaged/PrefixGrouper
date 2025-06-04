@@ -1,4 +1,6 @@
-# PrefixGrouper
+<h3 align="center">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/logo.png" width="352" style="max-width: 100%;">
+</h3>
 
 <h4 align="center">
     <p>
@@ -7,6 +9,10 @@
     </p>
 </h4>
 
+<h3 align="center">
+    <p>通过共享前缀前向传播实现高效GRPO训练</p>
+</h3>
+
 ``PrefixGrouper`` 是一个即插即用的高效 GRPO 训练工具，只需在已有的训练代码库上进行少量的修改，即可实现计算量减少、显存占用降低、训练加速。此外，该工具还可以用到除 GRPO 之外的其他需要共享前缀训练 / 推理的场景。
 
 目前主流的 GRPO 训练流程中，策略模型的训练主要是通过将前缀（通常是问题、多模态输入等）复制 ``G`` 次来实现的，那么显而易见的，当训练数据的前缀足够长时（如长上下文推理、图像或长视频推理等），训练过程中产生的冗余计算就变得不可忽视，从而导致显存占用增加、计算量增大、训练速度下降。对此，我们提出了 ``PrefixGrouper``，一个即插即用的 GRPO 训练工具，通过共享前缀的 forward 来实现高效训练。相对地，显存占用的降低反过来可以使得相同数量的显卡可以支持的最大 group_size 变大，这对于 GRPO 算法来说是至关重要的。
@@ -14,6 +20,16 @@
 ## 最新动态
 
 **[2025/6/3]** 我们正式发布 ``PrefixGrouper`` 工具。技术报告即将推出，敬请期待。
+
+## 方法概览
+
+``PrefixGrouper`` 的核心是其注意力操作的设计：
+
+<h3 align="center">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/method.jpg">
+</h3>
+
+通过将原始冗余的自注意力操作分解成前缀自注意力 + 后缀拼接注意力，``PrefixGrouper`` 可以实现高效 GRPO 训练，并且理论上兼容各种注意力实现（``EagerAttention``、``FlashAttention``、``SDPA`` 等）。
 
 ## 安装
 
@@ -167,19 +183,20 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=padding_mask)
 
 将 ``prefix`` 与 ``suffix`` 按照 ``group_info`` 来进行 concat，需要传入 ``prefix_mask`` 与 ``suffix_mask`` 来指定哪些位置是非 padding token。
 
-``prefix`` 与 ``suffix`` 的 shape 可为 [b, seq_len] 或 [b, seq_len, dim]，其中 ``prefix.shape[0]`` 应当为 sample 数量，``suffix.shape[0]`` 应当为全部 response 的数量。
+``prefix`` 与 ``suffix`` 的 shape 可为 ``[b, seq_len]`` 或 ``[b, seq_len, dim]``，其中 ``prefix.shape[0]`` 应当为 sample 数量，``suffix.shape[0]`` 应当为全部 response 的数量。
 
-``prefix_mask`` 与 ``suffix_mask`` 的 shape 应为 [b, seq_len]。
+``prefix_mask`` 与 ``suffix_mask`` 的 shape 应为 ``[b, seq_len]``。
 
 #### PrefixGrouper.forward(self, __attn_func: AttnFuncType, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *args, **kwargs)
 
 根据传入的 ``__attn_func`` 和一系列参数进行 attention 操作。``__attn_func`` 应当按照以下顺序接受参数：``q``、``k``、``v``、``attn_mask``、``*args``、``**kwargs``。如果已有的 attention 函数参数与上述顺序有差异，可以自定义一个 adapter 函数，按照上述顺序接收参数，然后转换成 attention 函数需要的参数形式进行调用。注意，``PrefixGrouper`` 会自动计算需要的 attention mask，请不要在 ``PrefixGrouper.forward`` 中手动传入 attention mask 参数。
 
-另外，为了统一，``PrefixGrouper.forward`` 接受的 ``q``、``k``、``v`` shape 应当为 [b, num_heads, seq_len, head_dim]，同样地，调用 ``__attn_func`` 时传入的 ``q``、``k``、``v`` shape 也是 [b, num_heads, seq_len, head_dim]。``__attn_func`` 所返回的输出 shape 应当为 [b, seq_len, num_heads, head_dim]，``PrefixGrouper.forward`` 所返回的输出 shape 也为 [b, seq_len, num_heads, head_dim]。在编写适配代码时请注意输入输出的维度顺序，在需要的位置进行 transpose。
+另外，为了统一，``PrefixGrouper.forward`` 接受的 ``q``、``k``、``v`` shape 应当为 ``[b, num_heads, seq_len, head_dim]``，同样地，调用 ``__attn_func`` 时传入的 ``q``、``k``、``v`` shape 也是 ``[b, num_heads, seq_len, head_dim]``。``__attn_func`` 所返回的输出 shape 应当为 ``[b, seq_len, num_heads, head_dim]``，``PrefixGrouper.forward`` 所返回的输出 shape 也为 ``[b, seq_len, num_heads, head_dim]``。在编写适配代码时请注意输入输出的维度顺序，在需要的位置进行 transpose。
 
 #### PrefixGrouper.split_output(self, output: torch.Tensor, include_prefix_last: int = 0)
 
-``output``：shape 为 [b, seq_len, dim]
+``output``：shape 为 ``[b, seq_len, dim]``
+
 ``include_prefix_last``：将前缀最后的 n 个 token 转换为共享的后缀 token，为 0 时则代表不转换（详见使用教程的数据输入输出部分）。
 
 ## 未来计划
@@ -187,6 +204,7 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=padding_mask)
 - [ ] Hugging Face transformers ``AttentionInterface`` 集成（该功能正在测试中）
 - [ ] 其他训练设备测试（``NPU`` 正在测试中，目前暂未发现不兼容问题）
 - [ ] 其他模型的测试用例（我们计划 release 纯文本版本的 ``Qwen2.5``、``Qwen3`` 模型的测试用例）
+- [ ] 兼容其他注意力实现（``EagerAttention``、``SDPA``）
 
 ## 数据使用声明
 
