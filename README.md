@@ -13,7 +13,7 @@ In current mainstream GRPO training pipelines, policy model training primarily i
 
 ## News
 
-- [2025/6/3] We release ``PrefixGrouper``. Tech report is coming, please stay tuned.
+**[2025/6/3]** We release ``PrefixGrouper``. Tech report is coming, please stay tuned.
 
 ## Installation
 
@@ -120,9 +120,9 @@ Core API documentation:
 
 ### PrefixGrouper
 
-#### PrefixGrouper(group_info: List[List[int]], device=None, padding_mode: Union[str, torch.Tensor] = "right")
+#### PrefixGrouper(Optional[List[List[int]]] = None, device=None, padding_mode: Union[str, torch.Tensor] = "right")
 
-`group_info`: Outer list: sample count (b). Inner lists: [prefix_len, suffix1_len, suffix2_len,...].
+`group_info`: Outer list: sample count (b). Inner lists: [prefix_len, suffix1_len, suffix2_len,...]. This parameter can be ``None``, in which case you need to manually call ``init`` (same signature as ``PrefixGrouper.__init__``) to implement delay initialization.
 
 `device`: Device for initializing PrefixGrouper (actual ops use input tensor's device).
 
@@ -150,6 +150,12 @@ Performs attention using `__attn_func`. Function signature: `attn_func(q, k, v, 
 
 `output`: Shape [b, seq_len, dim]
 `include_prefix_last`: Controls prefix boundary handling (0: no conversion; 1: attach last prefix token to suffixes).
+
+## Future Plans
+
+- [ ] Hugging Face Transformers ``AttentionInterface`` Integration (This feature is currently in testing)
+- [ ] Additional Training Device Support (``NPU`` under testing - no compatibility issues found so far)
+- [ ] Test Cases for More Models (We plan to release plain-text test cases for ``Qwen2.5`` and ``Qwen3`` models)
 
 ## Data Usage Statement
 

@@ -13,7 +13,7 @@
 
 ## 最新动态
 
-- [2025/6/3] 我们正式发布 ``PrefixGrouper`` 工具。技术报告即将推出，敬请期待。
+**[2025/6/3]** 我们正式发布 ``PrefixGrouper`` 工具。技术报告即将推出，敬请期待。
 
 ## 安装
 
@@ -137,9 +137,9 @@ else:
 
 ### PrefixGrouper
 
-#### PrefixGrouper(group_info: List[List[int]], device=None, padding_mode: Union[str, torch.Tensor] = "right")
+#### PrefixGrouper(group_info: Optional[List[List[int]]] = None, device=None, padding_mode: Union[str, torch.Tensor] = "right")
 
-参数 ``group_info`` 为 List[List[str]]，外层列表代表 sample 数量，内层列表代表 sample prefix 和 response suffix 的实际长度，其中内层列表的第一个元素代表 prefix 长度，剩余元素代表各个 response suffix 的长度。
+参数 ``group_info`` 为 List[List[str]]，外层列表代表 sample 数量，内层列表代表 sample prefix 和 response suffix 的实际长度，其中内层列表的第一个元素代表 prefix 长度，剩余元素代表各个 response suffix 的长度。该参数可以为 ``None``，此时需要在之后手动调用 ``init``（与 ``PrefixGrouper.__init__`` 签名相同）来实现延迟初始化。
 
 ``device``：PrefixGrouper 初始化流程所使用的 device，注意这并不代表注意力操作的实际 device，实际 forward 时会根据输入的 tensor device 来自动转换。
 
@@ -181,6 +181,12 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=padding_mask)
 
 ``output``：shape 为 [b, seq_len, dim]
 ``include_prefix_last``：将前缀最后的 n 个 token 转换为共享的后缀 token，为 0 时则代表不转换（详见使用教程的数据输入输出部分）。
+
+## 未来计划
+
+- [ ] Hugging Face transformers ``AttentionInterface`` 集成（该功能正在测试中）
+- [ ] 其他训练设备测试（``NPU`` 正在测试中，目前暂未发现不兼容问题）
+- [ ] 其他模型的测试用例（我们计划 release 纯文本版本的 ``Qwen2.5``、``Qwen3`` 模型的测试用例）
 
 ## 数据使用声明
 
