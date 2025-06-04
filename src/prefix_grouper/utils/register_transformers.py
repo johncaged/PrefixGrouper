@@ -47,17 +47,20 @@ def _prefix_grouper_attention_forward(
     Convert the attention call to ``AttentionForward``
     """
     # NOTE: ``attention_mask`` param is ignored.
-    return AttentionForward(_attention_forward)(
-        prefix_grouper,
-        query,
-        key,
-        value,
-        # The following are custom parameters
-        module,
-        *args,
-        prefix_grouper_attn_func=prefix_grouper_attn_func,
-        **kwargs,
-    ), None  # NOTE: We do not support returning attention weights for now.
+    return (
+        AttentionForward(_attention_forward)(
+            prefix_grouper,
+            query,
+            key,
+            value,
+            # The following are custom parameters
+            module,
+            *args,
+            prefix_grouper_attn_func=prefix_grouper_attn_func,
+            **kwargs,
+        ),
+        None,
+    )  # NOTE: We do not support returning attention weights for now.
 
 
 def register_attention():
@@ -66,4 +69,6 @@ def register_attention():
     """
     from transformers.modeling_utils import AttentionInterface
 
-    AttentionInterface.register("prefix_grouper_attention", _prefix_grouper_attention_forward)
+    AttentionInterface.register(
+        "prefix_grouper_attention", _prefix_grouper_attention_forward
+    )

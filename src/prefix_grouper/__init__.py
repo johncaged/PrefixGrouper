@@ -228,11 +228,11 @@ class PrefixGrouper:
     @property
     def padding_mask(self):
         return self.group_info.padding_mask
-    
+
     @property
     def grouped_prefix_mask(self):
         return self.group_info.grouped_prefix_mask
-    
+
     @property
     def grouped_suffix_mask(self):
         return self.group_info.grouped_suffix_mask
@@ -256,7 +256,7 @@ class PrefixGrouper:
     @property
     def grouped_prefix_indices(self):
         return self.group_info.grouped_prefix_indices
-    
+
     @property
     def grouped_suffix_indices(self):
         return self.group_info.grouped_suffix_indices
@@ -272,7 +272,7 @@ class PrefixGrouper:
     @property
     def x_shape(self):
         return self.group_info.x_shape
-    
+
     @property
     def prefix_x_shape(self):
         return self.group_info.prefix_x_shape
