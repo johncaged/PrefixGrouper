@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefix_grouper"
-version = "0.0.0rc1"
+version = "0.0.0.rc2"
 description = "An efficient GRPO training util."
 readme = "README.md"
 authors = [{ name = "Zikang Liu", email = "liuzikang0625@gmail.com" }]
@@ -22,4 +22,7 @@ Homepage = "https://github.com/johncaged/PrefixGrouper"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["prefix_grouper"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["prefix_grouper", "prefix_grouper.*"]
