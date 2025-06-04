@@ -5,7 +5,7 @@ except Exception:
 
 import torch
 from .utils import batch_repeat_cat
-from .utils.typing import List, Union, Tuple
+from .utils.typing import List, Union, Tuple, Optional
 from .function import GroupFunction, UngroupFunction
 from .forward import AttentionForward, AttnFuncType
 from .info import GroupInfo
@@ -19,10 +19,25 @@ SplittedOutputTuple = Tuple[torch.Tensor, torch.Tensor]
 class PrefixGrouper:
     def __init__(
         self,
-        group_info: List[List[int]],
+        group_info: Optional[List[List[int]]] = None,
         device=None,
         padding_mode: Union[str, torch.Tensor] = "right",
     ) -> None:
+        """
+        NOTE: If ``group_info`` is None, then initialization is not performed, and you can
+        call the ``init`` method later.
+        """
+        if group_info is not None:
+            self.init(group_info, device, padding_mode)
+
+    def init(
+        self,
+        group_info: List[List[int]],
+        device=None,
+        padding_mode: Union[str, torch.Tensor] = "right",
+    ):
+        if hasattr(self, "group_info"):
+            print("WARNING: You are trying to re-init the ``group_info`` param.")
         self.group_info = GroupInfo.from_list(
             group_info=group_info, device=device, padding_mode=padding_mode
         )
@@ -31,13 +46,13 @@ class PrefixGrouper:
         """
         Get ungroup indices and shapes.
         """
-        prefix_x_shape = self.group_info.prefix_x_shape
-        suffix_x_shape = self.group_info.suffix_x_shape
+        prefix_x_shape = self.prefix_x_shape
+        suffix_x_shape = self.suffix_x_shape
         indices = (
-            self.group_info.ungrouped_prefix_indices.to(device),
-            self.group_info.ungrouped_suffix_indices.to(device),
-            self.group_info.grouped_prefix_indices.to(device),
-            self.group_info.grouped_suffix_indices.to(device),
+            self.ungrouped_prefix_indices.to(device),
+            self.ungrouped_suffix_indices.to(device),
+            self.grouped_prefix_indices.to(device),
+            self.grouped_suffix_indices.to(device),
         )
         shapes = (prefix_x_shape, suffix_x_shape)
         return indices, shapes
@@ -76,12 +91,12 @@ class PrefixGrouper:
             o_prefix,
             o_suffix,
             (
-                self.group_info.ungrouped_prefix_indices.to(device),
-                self.group_info.ungrouped_suffix_indices.to(device),
-                self.group_info.grouped_prefix_indices.to(device),
-                self.group_info.grouped_suffix_indices.to(device),
+                self.ungrouped_prefix_indices.to(device),
+                self.ungrouped_suffix_indices.to(device),
+                self.grouped_prefix_indices.to(device),
+                self.grouped_suffix_indices.to(device),
             ),
-            self.group_info.x_shape,
+            self.x_shape,
         )
 
     def concat_input(
@@ -112,10 +127,10 @@ class PrefixGrouper:
             (
                 prefix_mask.nonzero(as_tuple=False).to(device),
                 suffix_mask.nonzero(as_tuple=False).to(device),
-                self.group_info.grouped_prefix_indices.to(device),
-                self.group_info.grouped_suffix_indices.to(device),
+                self.grouped_prefix_indices.to(device),
+                self.grouped_suffix_indices.to(device),
             ),
-            self.group_info.x_shape,
+            self.x_shape,
         )
         return input_.reshape(*(input_.shape[: prefix.ndim]))
 
@@ -146,8 +161,8 @@ class PrefixGrouper:
             suffix_output.squeeze(1),
         )
         prefix_mask, suffix_mask = (
-            self.group_info.ungrouped_prefix_mask,
-            self.group_info.ungrouped_suffix_mask,
+            self.ungrouped_prefix_mask,
+            self.ungrouped_suffix_mask,
         )
         if include_prefix_last > 0:
             suffix_output = self.batch_repeat_cat(
@@ -186,9 +201,82 @@ class PrefixGrouper:
             prefix=prefix,
             suffix=suffix,
             cat_dim=cat_dim,
-            num_samples=self.group_info.num_samples,
+            num_samples=self.num_samples,
         )
 
-    def __getattr__(self, name: str):
-        # NOTE: For backward compatibility
-        return getattr(self.group_info, name)
+    # NOTE: We manually set property here rather than using dynamic ``__getattribute__`` to enable type hint
+    @property
+    def prefix_lens(self):
+        return self.group_info.prefix_lens
+
+    @property
+    def grouped_suffix_lens(self):
+        return self.group_info.grouped_suffix_lens
+
+    @property
+    def ungrouped_suffix_lens(self):
+        return self.group_info.ungrouped_suffix_lens
+
+    @property
+    def num_samples(self):
+        return self.group_info.num_samples
+
+    @property
+    def total_lens(self):
+        return self.group_info.total_lens
+
+    @property
+    def padding_mask(self):
+        return self.group_info.padding_mask
+    
+    @property
+    def grouped_prefix_mask(self):
+        return self.group_info.grouped_prefix_mask
+    
+    @property
+    def grouped_suffix_mask(self):
+        return self.group_info.grouped_suffix_mask
+
+    @property
+    def ungrouped_prefix_mask(self):
+        return self.group_info.ungrouped_prefix_mask
+
+    @property
+    def ungrouped_suffix_mask(self):
+        return self.group_info.ungrouped_suffix_mask
+
+    @property
+    def prefix_attn_mask(self):
+        return self.group_info.prefix_attn_mask
+
+    @property
+    def suffix_attn_mask(self):
+        return self.group_info.suffix_attn_mask
+
+    @property
+    def grouped_prefix_indices(self):
+        return self.group_info.grouped_prefix_indices
+    
+    @property
+    def grouped_suffix_indices(self):
+        return self.group_info.grouped_suffix_indices
+
+    @property
+    def ungrouped_prefix_indices(self):
+        return self.group_info.ungrouped_prefix_indices
+
+    @property
+    def ungrouped_suffix_indices(self):
+        return self.group_info.ungrouped_suffix_indices
+
+    @property
+    def x_shape(self):
+        return self.group_info.x_shape
+    
+    @property
+    def prefix_x_shape(self):
+        return self.group_info.prefix_x_shape
+
+    @property
+    def suffix_x_shape(self):
+        return self.group_info.suffix_x_shape
