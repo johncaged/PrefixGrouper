@@ -34,11 +34,11 @@
 ``PrefixGrouper`` 与 baseline FLOPs 和显存占用对比如下，展示了固定前缀长度下（4096、8192、16384）不同前后缀长度比例的结果（前缀长度 / 后缀长度）：
 
 <h3 align="center">
-    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/flops.png" style="max-width: 90%">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/flops.png" width="90%" style="max-width: 90%">
 </h3>
 
 <h3 align="center">
-    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/mem.png" style="max-width: 90%">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/mem.png" width="90%" style="max-width: 90%">
 </h3>
 
 ``PrefixGrouper`` 在长上下文场景下展现出明显优势，更说明其高效性。

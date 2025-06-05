@@ -34,11 +34,11 @@ By decomposing the original redundant self-attention operation into prefix self-
 Comparison of FLOPs and memory usage between ``PrefixGrouper`` and baseline is as follows, which display results at fixed prefix lengths (4096, 8192, and 16384) across different ratios (prefix length / suffix length):
 
 <h3 align="center">
-    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/flops.png" style="max-width: 90%">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/flops.png" width="90%" style="max-width: 90%">
 </h3>
 
 <h3 align="center">
-    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/mem.png" style="max-width: 90%">
+    <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/mem.png" width="90%" style="max-width: 90%">
 </h3>
 
 ``PrefixGrouper`` demonstrates significant advantages in long-context scenarios, further highlighting its efficiency.
