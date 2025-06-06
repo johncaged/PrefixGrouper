@@ -230,6 +230,7 @@ def test_prefix_grouper(
     prefix_output, prefix_mask, suffix_output, suffix_mask = (
         prefix_grouper.split_output(res.logits)
     )
+    suffix_ids = prefix_grouper.convert_padding(suffix_ids, suffix_mask, padding_mode="right")
     suffix_output = suffix_output[:, :-1].float()
     suffix_mask = suffix_mask[:, 1:]
     loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)[:, 1:]).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
@@ -297,18 +298,19 @@ def test_prefix_grouper_include_last(
     # Calculate loss and backward
     # NOTE: The last token of the prefix should be changed to the first input token of the suffix
     # NOTE: The new ``suffix_mask`` will include the last prefix token at the start
-    prefix_output, prefix_mask, suffix_output, suffix_mask = (
+    prefix_output, prefix_mask, suffix_output, suffix_mask_out = (
         prefix_grouper.split_output(res.logits, include_prefix_last=1)
     )
+    suffix_ids = prefix_grouper.convert_padding(suffix_ids, suffix_mask, padding_mode="right")
     suffix_output = suffix_output[:, :-1].float()
-    suffix_mask = suffix_mask[:, 1:]
+    suffix_mask_out = suffix_mask_out[:, 1:]
     loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
-    loss = loss * suffix_mask
-    loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
+    loss = loss * suffix_mask_out
+    loss = (loss.sum(-1) / suffix_mask_out.sum(-1)).mean()
     if loss.requires_grad:
         (-loss).backward()
     return (
-        [out[mask] for out, mask in zip(suffix_output, suffix_mask)],
+        [out[mask] for out, mask in zip(suffix_output, suffix_mask_out)],
         get_grad(model),
     )
 
@@ -362,18 +364,19 @@ def test_prefix_grouper_include_last_auto_group_info(
     # Calculate loss and backward
     # NOTE: The last token of the prefix should be changed to the first input token of the suffix
     # NOTE: The new ``suffix_mask`` will include the last prefix token at the start
-    prefix_output, prefix_mask, suffix_output, suffix_mask = (
+    prefix_output, prefix_mask, suffix_output, suffix_mask_out = (
         prefix_grouper.split_output(res.logits, include_prefix_last=1)
     )
+    suffix_ids = prefix_grouper.convert_padding(suffix_ids, suffix_mask, padding_mode="right")
     suffix_output = suffix_output[:, :-1].float()
-    suffix_mask = suffix_mask[:, 1:]
+    suffix_mask_out = suffix_mask_out[:, 1:]
     loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
-    loss = loss * suffix_mask
-    loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
+    loss = loss * suffix_mask_out
+    loss = (loss.sum(-1) / suffix_mask_out.sum(-1)).mean()
     if loss.requires_grad:
         (-loss).backward()
     return (
-        [out[mask] for out, mask in zip(suffix_output, suffix_mask)],
+        [out[mask] for out, mask in zip(suffix_output, suffix_mask_out)],
         get_grad(model),
     )
 
@@ -422,12 +425,14 @@ def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
     # Baseline method
     outputs, grads = test_baseline(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
-    # PrefixGrouper with separate last prefix token
-    outputs2, grads2 = test_prefix_grouper(**load_input_data(model_path, processor, device, data))
-    empty_cache_func()
-    # PrefixGrouper with shared last prefix token
-    outputs3, grads3 = test_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
-    empty_cache_func()
+    
+    # # PrefixGrouper with separate last prefix token (legacy version)
+    # outputs2, grads2 = test_prefix_grouper(**load_input_data(model_path, processor, device, data))
+    # empty_cache_func()
+    # # PrefixGrouper with shared last prefix token (legacy version)
+    # outputs3, grads3 = test_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
+    # empty_cache_func()
+    
     # PrefixGrouper best practice for now! Simplest usage.
     outputs4, grads4 = test_prefix_grouper_include_last_auto_group_info(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
