@@ -107,7 +107,7 @@ def create_padding_mask(
     padding_mode: Union[str, torch.Tensor],
     total_lens: torch.Tensor,
     batch_size: int,
-    device,
+    device=None,
 ) -> torch.Tensor:
     """
     Create and verify padding masks. ``True`` represents non-padding tokens, while ``False``

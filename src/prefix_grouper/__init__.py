@@ -5,8 +5,9 @@ except Exception:
 
 import torch
 from .utils import batch_repeat_cat
+from .utils.mask import create_padding_mask
 from .utils.typing import List, Union, Tuple, Optional
-from .function import GroupFunction, UngroupFunction
+from .function import GroupFunction, UngroupFunction, ConvertPaddingFunction
 from .forward import AttentionForward, AttnFuncType
 from .info import GroupInfo
 
@@ -61,10 +62,16 @@ class PrefixGrouper:
             ), f"When ``group_sizes`` is an integer value, then ``group_sizes * prefix_mask.shape[0]`` must be equal to ``suffix_mask.shape[0]``, got (prefix_mask.shape[0]={prefix_mask.shape[0]}, suffix_mask.shape[0]={suffix_mask.shape[0]}, group_sizes={group_sizes})."
             group_sizes = [group_sizes] * prefix_mask.shape[0]
         elif isinstance(group_sizes, list):
-            assert prefix_mask.shape[0] == len(group_sizes), f"When ``group_sizes`` is a list, then ``prefix_mask.shape[0]`` must be equal to ``len(group_sizes)``, got {prefix_mask.shape[0]} and {len(group_sizes)}"
-            assert sum(group_sizes) == suffix_mask.shape[0], f"When ``group_sizes`` is a list, then ``sum(group_sizes)`` must be equal to ``suffix_mask.shape[0]``, got {sum(group_sizes)} and {suffix_mask.shape[0]}"
+            assert prefix_mask.shape[0] == len(
+                group_sizes
+            ), f"When ``group_sizes`` is a list, then ``prefix_mask.shape[0]`` must be equal to ``len(group_sizes)``, got {prefix_mask.shape[0]} and {len(group_sizes)}"
+            assert (
+                sum(group_sizes) == suffix_mask.shape[0]
+            ), f"When ``group_sizes`` is a list, then ``sum(group_sizes)`` must be equal to ``suffix_mask.shape[0]``, got {sum(group_sizes)} and {suffix_mask.shape[0]}"
         else:
-            raise ValueError(f"``group_sizes`` should be either ``int`` or ``List[int]``, got ``{type(group_sizes)}``")
+            raise ValueError(
+                f"``group_sizes`` should be either ``int`` or ``List[int]``, got ``{type(group_sizes)}``"
+            )
 
         prefix_lens: List[int] = prefix_mask.sum(dim=1).tolist()
         suffix_lens = suffix_mask.sum(dim=1)
@@ -72,8 +79,33 @@ class PrefixGrouper:
             [int(l.item()) for l in chunk]
             for chunk in torch.split(suffix_lens, group_sizes, dim=0)
         ]
-        group_info = [[p_len, *s_lens] for p_len, s_lens in zip(prefix_lens, suffix_lens)]
+        group_info = [
+            [p_len, *s_lens] for p_len, s_lens in zip(prefix_lens, suffix_lens)
+        ]
         return cls(group_info=group_info, device=device, padding_mode=padding_mode)
+
+    @staticmethod
+    def convert_padding(
+        x: torch.Tensor,
+        x_mask: torch.Tensor,
+        padding_mode: Union[str, torch.Tensor] = "right",
+    ):
+        assert x_mask.ndim == 2, "The mask should be a 2d Tensor."
+        device = x.device
+        padding_mask = create_padding_mask(
+            padding_mode=padding_mode,
+            total_lens=x_mask.sum(dim=1),
+            batch_size=x.shape[0],
+            device=device,
+        )
+        return ConvertPaddingFunction.apply(
+            x,
+            (
+                x_mask.nonzero(as_tuple=False).to(device),
+                padding_mask.nonzero(as_tuple=False).to(device),
+            ),
+            padding_mask.shape,
+        )
 
     def get_ungroup_args(self, device=None):
         """
@@ -148,16 +180,14 @@ class PrefixGrouper:
         Output: input tensor in the shape of [b, seq, ...]
         """
         assert prefix_mask.ndim == suffix_mask.ndim == 2, "Masks should be 2d Tensors."
-        assert prefix.ndim == suffix.ndim
         assert (
-            prefix.ndim == 2 or prefix.ndim == 3
-        ), f"Can only accept input shape of [b, seq] or [b, seq, dim], got {prefix.shape}"
+            prefix.ndim == suffix.ndim >= 2
+        ), f"ndim of prefix and suffix should be equal, and both >= 2 ([b, seq, ...]), but got {prefix.ndim} and {suffix.ndim}"
 
         device = prefix.device
         input_: torch.Tensor = GroupFunction.apply(
-            # NOTE: unsqueeze to 4d to fit the group function
-            prefix.reshape(*prefix.shape, *((1,) * (4 - prefix.ndim))),
-            suffix.reshape(*suffix.shape, *((1,) * (4 - suffix.ndim))),
+            prefix,
+            suffix,
             (
                 prefix_mask.nonzero(as_tuple=False).to(device),
                 suffix_mask.nonzero(as_tuple=False).to(device),
@@ -166,7 +196,7 @@ class PrefixGrouper:
             ),
             self.x_shape,
         )
-        return input_.reshape(*(input_.shape[: prefix.ndim]))
+        return input_
 
     def split_output(
         self,
@@ -176,17 +206,17 @@ class PrefixGrouper:
         """
         Split the output into prefix and suffix parts.
 
-        Input: output tensors in the shape of [b, seq, dim]
+        Input: output tensors in the shape of [b, seq, ...]
 
-        Output: prefix, suffix tensors in the shape of [b, seq, dim]
+        Output: prefix, suffix tensors in the shape of [b, seq, ...]
         """
         assert include_prefix_last >= 0
         assert (
-            output.ndim == 3
-        ), f"``output`` should be in the shape of [b, seq, dim], got {output.shape}"
+            output.ndim >= 2
+        ), f"ndim of output should be >= 2 ([b, seq, ...]), but got {output.ndim}"
         indices, shapes = self.get_ungroup_args(output.device)
         prefix_output, suffix_output = UngroupFunction.apply(
-            output.unsqueeze(1),  # NOTE: unsqueeze to 4d to fit the ungroup function
+            output.unsqueeze(1),  # NOTE: unsqueeze to fit the ungroup function
             indices,
             shapes,
         )
