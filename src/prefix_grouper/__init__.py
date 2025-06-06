@@ -42,6 +42,39 @@ class PrefixGrouper:
             group_info=group_info, device=device, padding_mode=padding_mode
         )
 
+    @classmethod
+    def from_ungrouped_masks(
+        cls,
+        prefix_mask: torch.Tensor,
+        suffix_mask: torch.Tensor,
+        group_sizes: Union[int, List[int]],
+        device=None,
+        padding_mode: Union[str, torch.Tensor] = "right",
+    ):
+        """
+        Automatically calculate ``group_info`` using masks and create a new instance.
+        """
+        assert prefix_mask.ndim == suffix_mask.ndim == 2, "Masks should be 2d Tensors."
+        if isinstance(group_sizes, int):
+            assert (
+                group_sizes * prefix_mask.shape[0] == suffix_mask.shape[0]
+            ), f"When ``group_sizes`` is an integer value, then ``group_sizes * prefix_mask.shape[0]`` must be equal to ``suffix_mask.shape[0]``, got (prefix_mask.shape[0]={prefix_mask.shape[0]}, suffix_mask.shape[0]={suffix_mask.shape[0]}, group_sizes={group_sizes})."
+            group_sizes = [group_sizes] * prefix_mask.shape[0]
+        elif isinstance(group_sizes, list):
+            assert prefix_mask.shape[0] == len(group_sizes), f"When ``group_sizes`` is a list, then ``prefix_mask.shape[0]`` must be equal to ``len(group_sizes)``, got {prefix_mask.shape[0]} and {len(group_sizes)}"
+            assert sum(group_sizes) == suffix_mask.shape[0], f"When ``group_sizes`` is a list, then ``sum(group_sizes)`` must be equal to ``suffix_mask.shape[0]``, got {sum(group_sizes)} and {suffix_mask.shape[0]}"
+        else:
+            raise ValueError(f"``group_sizes`` should be either ``int`` or ``List[int]``, got ``{type(group_sizes)}``")
+
+        prefix_lens: List[int] = prefix_mask.sum(dim=1).tolist()
+        suffix_lens = suffix_mask.sum(dim=1)
+        suffix_lens = [
+            [int(l.item()) for l in chunk]
+            for chunk in torch.split(suffix_lens, group_sizes, dim=0)
+        ]
+        group_info = [[p_len, *s_lens] for p_len, s_lens in zip(prefix_lens, suffix_lens)]
+        return cls(group_info=group_info, device=device, padding_mode=padding_mode)
+
     def get_ungroup_args(self, device=None):
         """
         Get ungroup indices and shapes.
@@ -114,6 +147,7 @@ class PrefixGrouper:
 
         Output: input tensor in the shape of [b, seq, ...]
         """
+        assert prefix_mask.ndim == suffix_mask.ndim == 2, "Masks should be 2d Tensors."
         assert prefix.ndim == suffix.ndim
         assert (
             prefix.ndim == 2 or prefix.ndim == 3

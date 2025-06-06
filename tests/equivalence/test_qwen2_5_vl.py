@@ -101,7 +101,7 @@ def get_grad(model):
     }
 
 
-def forward_backward_base(
+def test_baseline(
     model_path: str,
     processor,
     videos: List,
@@ -168,7 +168,7 @@ def forward_backward_base(
     )
 
 
-def forward_backward_prefix_grouper(
+def test_prefix_grouper(
     model_path: str,
     processor,
     videos: List,
@@ -243,7 +243,7 @@ def forward_backward_prefix_grouper(
     )
 
 
-def forward_backward_prefix_grouper_include_last(
+def test_prefix_grouper_include_last(
     model_path: str,
     processor,
     videos: List,
@@ -313,6 +313,71 @@ def forward_backward_prefix_grouper_include_last(
     )
 
 
+def test_prefix_grouper_include_last_auto_group_info(
+    model_path: str,
+    processor,
+    videos: List,
+    instructions: List[str],
+    responses: List[List[str]],
+    load_kwargs: dict,
+    device,
+):
+    """
+    Run forward and backward pass in PrefixGrouper.
+    """
+    # NOTE: We import the module using python file path
+    modeling_qwen2_5_vl = load_module(
+        "modeling_qwen2_5_vl", "./examples/qwen2_5_vl/modeling_qwen2_5_vl.py"
+    )
+    Qwen2_5_VLPrefixGrouper = modeling_qwen2_5_vl.Qwen2_5_VLForConditionalGeneration
+    model = Qwen2_5_VLPrefixGrouper.from_pretrained(
+        model_path, **load_kwargs, device_map=device
+    )
+    model.gradient_checkpointing_enable()
+    prompt_inputs = process_inputs(processor, videos, instructions, device)
+    prompt_ids = prompt_inputs.pop("input_ids")
+    prompt_mask = prompt_inputs.pop("attention_mask")
+
+    # NOTE: Suppose we have got the final responses by the model here
+    suffix_inputs = processor(
+        text=[r for resps in responses for r in resps],
+        return_tensors="pt",
+        padding=True,
+        padding_side="right",
+        add_special_tokens=False,
+    )
+    suffix_ids = suffix_inputs["input_ids"].to(device)
+    suffix_mask = suffix_inputs["attention_mask"].to(device)
+    prefix_grouper = PrefixGrouper.from_ungrouped_masks(
+        # NOTE: The ``group_info`` can be automatically calculated through masks!
+        prefix_mask=prompt_mask,
+        suffix_mask=suffix_mask,
+        group_sizes=[len(resps) for resps in responses],
+        device=device,
+        padding_mode="right",
+    )
+    prompt_inputs["input_ids"] = prefix_grouper.concat_input(prompt_ids, prompt_mask, suffix_ids, suffix_mask)
+    prompt_inputs["attention_mask"] = prefix_grouper.padding_mask
+    res = model(**prompt_inputs, use_cache=False, prefix_grouper=prefix_grouper)
+    # Calculate loss and backward
+    # NOTE: The last token of the prefix should be changed to the first input token of the suffix
+    # NOTE: The new ``suffix_mask`` will include the last prefix token at the start
+    prefix_output, prefix_mask, suffix_output, suffix_mask = (
+        prefix_grouper.split_output(res.logits, include_prefix_last=1)
+    )
+    suffix_output = suffix_output[:, :-1].float()
+    suffix_mask = suffix_mask[:, 1:]
+    loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
+    loss = loss * suffix_mask
+    loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
+    if loss.requires_grad:
+        (-loss).backward()
+    return (
+        [out[mask] for out, mask in zip(suffix_output, suffix_mask)],
+        get_grad(model),
+    )
+
+
 def load_input_data(model_path, processor, device, data: list):
     video_base_dir = "./tests/test_inputs/videos"
     text_base_dir = "./tests/test_inputs/captions"
@@ -355,13 +420,16 @@ def test(model_path: str, empty_cache_func: Callable[[], Any], device=None):
     # NOTE: The three methods use the same ``load_input_data`` function, which means this part is totally 
     # the same among these methods, and all we should focus on is the ``forward_backward_xxx`` function.
     # Baseline method
-    outputs, grads = forward_backward_base(**load_input_data(model_path, processor, device, data))
+    outputs, grads = test_baseline(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
     # PrefixGrouper with separate last prefix token
-    outputs2, grads2 = forward_backward_prefix_grouper(**load_input_data(model_path, processor, device, data))
+    outputs2, grads2 = test_prefix_grouper(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
     # PrefixGrouper with shared last prefix token
-    outputs3, grads3 = forward_backward_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
+    outputs3, grads3 = test_prefix_grouper_include_last(**load_input_data(model_path, processor, device, data))
+    empty_cache_func()
+    # PrefixGrouper best practice for now! Simplest usage.
+    outputs4, grads4 = test_prefix_grouper_include_last_auto_group_info(**load_input_data(model_path, processor, device, data))
     empty_cache_func()
     breakpoint()
 
