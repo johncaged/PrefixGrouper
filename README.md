@@ -150,7 +150,7 @@ Propagate `prefix_grouper` parameter through model forward passes.
 
 ### Position Encoding
 
-Position IDs for concatenated responses should share the same starting ID pattern: ``[0, 1, ..., prefix_len, prefix_len+1, ..., suffix1_end, prefix_len+1, ..., suffix2_end, ...]``.
+Position IDs for concatenated responses should share the same starting ID pattern: ``[0, 1, ..., prefix_len, prefix_len+1, ..., suffix1_end, prefix_len+1, ..., suffix2_end, ...]``. Some useful information: ``prefix_grouper.group_info[i].prefix_len`` and ``prefix_grouper.group_info[i].suffix_lens`` can obtain the prefix/suffix length information (number of valid tokens excluding padding) for the ``i``-th sample; ``prefix_grouper.padding_mask`` can retrieve the attention mask for the input tensor after concatenating the prefix and suffix. The above information can be used to assist in position ids calculation.
 
 Position encoding is pre-adapted for models in the ``Quick Start`` section (see examples).
 

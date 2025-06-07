@@ -153,7 +153,7 @@ else:
 
 ### 位置编码
 
-对于位置编码，拼接之后输入的 responses 应该共用同一个起始 id，也就是 ``[0, 1, ..., n（前缀长度）, n + 1, ..., m（后缀1）, n + 1, ..., m2（后缀2）, n + 1, ..., m3（后缀3）, ...（依此类推）]``。
+对于位置编码，拼接之后输入的 responses 应该共用同一个起始 id，也就是 ``[0, 1, ..., n（前缀长度）, n + 1, ..., m（后缀1）, n + 1, ..., m2（后缀2）, n + 1, ..., m3（后缀3）, ...（依此类推）]``。一些有用的信息：``prefix_grouper.group_info[i].prefix_len`` 和 ``prefix_grouper.group_info[i].suffix_lens`` 可以获得第 ``i`` 个 sample 的前缀/后缀长度信息（不算 padding 的有效 token 数）；``prefix_grouper.padding_mask`` 可以获得前缀和后缀 concat 之后的 input tensor 的 attention mask。上述信息可以用于辅助 position ids 的计算。
 
 对于``快速上手``部分的模型，我们已经对位置编码进行了适配，可以在对应代码中查看具体的示例。
 
