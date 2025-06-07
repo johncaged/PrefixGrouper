@@ -19,6 +19,8 @@
 
 ## 最新动态
 
+**[2025/6/7]** 我们更新 ``PrefixGrouper`` 版本到 ``0.0.1rc2``，封装性更好，代码改动更少，欢迎使用！
+
 **[2025/6/3]** 我们正式发布 ``PrefixGrouper`` 工具。技术报告即将推出，敬请期待。
 
 ## 方法概览
@@ -45,7 +47,7 @@
 
 ## 安装
 
-```py
+```bash
 pip install prefix_grouper
 ```
 
@@ -58,6 +60,13 @@ pip install prefix_grouper
 
 如果你恰好需要使用示例中的模型进行训练，那么可以直接将示例中的代码引入到你的代码库。然而，我们还是建议你简单了解一下 ``PrefixGrouper`` 的使用教程，以更清楚地了解该工具的运行流程。
 
+运行示例：
+
+```bash
+cd PrefixGrouper
+python src/tests/equivalence/test_xxx.py --model_path /path/to/your/model
+```
+
 ## 使用教程
 
 简单来说，``PrefixGrouper`` 主要需要对 GRPO 训练流程进行三个方面的修改：数据输入输出、注意力机制和位置编码。在全文中，我们将一个问题 query（也就是前缀）所对应的数据称为一个 sample，而由模型根据前缀所采样生成的每一个输出，我们称为一个 response。
@@ -66,63 +75,56 @@ pip install prefix_grouper
 
 为了降低前缀 forward 冗余、尽可能利用并行加速，``PrefixGrouper`` 首先将 batch 内的每一个 sample 与它所对应的多个 responses 进行拼接，得到 grouped 输入（以下进行伪代码示例）：
 
+- 最佳实践（需要 ``0.0.1rc2`` 版本及以上）
+
 ```py
-# 假设这里我们已经拿到了前缀的 input_ids，它是一个已经 padding 过的 torch.Tensor，shape 为 [b, seq_len1]（其对应的 mask 也是同样的 shape）
+# 前缀：[b1, seq_len1]，b1 应为 sample 数量
 prompt_ids = ...
+# 前缀 mask：[b1, seq_len1]
 prompt_mask = ...
+# 后缀：[b2, seq_len2]，b2 应为所有 sample 的 responses 总数
+completion_ids = ...
+# 后缀 mask：[b2, seq_len2]
+completion_mask = ...
+# int 或 List[int]，int 代表每个 sample 都有相同数量的 responses，List[int] 则指定每个 sample 具有不同数量的 responses。
+group_sizes = ...
 
-# 这里我们假设已经获取了由模型生成的 responses，生成的方式（无论是 model.generate 还是 vLLM 等）我们在这里不关心，只要最终得到 responses 的输出 str 或者 input_ids 即可。
-# 这里我们将 responses 设置成 List[List[str]]，最外层的 list 代表 sample 的数量，也就是 prompt_ids shape 对应的 b，最内层的 list 则代表 response 的数量，也就是每一个 sample 产生了多少个 response。注意这里每个 sample 对应的 response 数量可以不同，PrefixGrouper 对此进行了适配。
-responses: List[List[str]] = ...
-# 将 responses 铺平，使用 tokenizer、processor 等将其 tokenize 并 padding 成 input_ids。此处的 shape 应该为 [b * group_size（假设每个 sample 的 response 数量都是 group_size）, seq_len2]。
-suffix_ids = ...
-suffix_mask = ...
-
-# ====== 至此，所需要的输入就处理完毕了 ======
-
-# 接下来，我们需要创建一个 PrefixGrouper 实例，用于共享前缀输入
-# 首先，PrefixGrouper 需要一个必要的信息，也就是 group_info，它需要知道我们刚刚拼接的输入中哪些部分是前缀、哪些部分是后缀。
-# 同样的，group_info 是一个嵌套 list，最外层代表 sample 数量 b，最内层则代表前缀、后缀的长度（其中第一个元素就是前缀长度，从第二个元素开始就代表着每一个后缀的长度），需要与我们刚刚处理的输入对应。举例：group_info[0][0]，代表第一个 sample 的前缀长度，group_info[0][1]，则代表第一个 sample 的第一个后缀（response）长度。这里的长度指的是有效长度，也就是“实际不为 padding 的，包含了多模态 token 数量的长度”。
-# 我们在这里提供一些思路：对于 Qwen2.5-VL 来说，由 processor 处理过的 inputs，其实本身是包含了对应视觉 token 数量的占位符的，因此我们只需要计算 prompt_mask.sum(-1)，就可以得到每一个前缀的真实长度；对于 LLaVA-NeXT 系列的 codebase 来说，我们可以修改一下数据的处理，首先将 prompt_ids 输入到 prepare_inputs_labels_for_multimodal，让其进行多模态 token 的拼接，然后得到的结果可以通过类似的 attention_mask.sum(-1) 来获取真实的前缀长度。至于后缀长度，可以直接通过后缀的 suffix_mask.sum(-1) 来得到。
-group_info: List[List[int]] = ...
 # 初始化一个 PrefixGrouper 实例。
-prefix_grouper = PrefixGrouper(
-    group_info=group_info,
+prefix_grouper = PrefixGrouper.from_ungrouped_masks(
+    prefix_mask=prompt_mask,
+    suffix_mask=completion_mask,
+    group_sizes=group_sizes,
     padding_mode="right",
     device=device,
 )
-# 这里我们利用 PrefixGrouper 将分散的输入拼接成最终的 input_ids，其 shape 为 [b, seq_len]。注意 seq_len 可能不等于 seq_len1 + seq_len2 * group_size，因为拼接过程会对输入进行优化，去掉冗余的 padding。
-input_ids = prefix_grouper.concat_input(prompt_ids, prompt_mask, suffix_ids, suffix_mask)
+# 这里我们利用 PrefixGrouper 将分散的输入拼接成最终的 input_ids，其 shape 为 [b1, seq_len]。
+# NOTE: 还可以输入特征，即 prompt_embeds ([b1, seq_len1, dim])，suffix_embeds ([b2, seq_len2, dim])
+input_ids = prefix_grouper.concat_input(prompt_ids, prompt_mask, completion_ids, completion_mask)
+
 # 这里进行模型 forward，只需要多加一个参数即可
 res = model(*args, **kwargs, prefix_grouper=prefix_grouper)
 # ====== 至此，forward 流程完毕 ======
-
-# 接下来我们开始计算 loss，并进行 backward
-# 由于训练过程中采用自回归进行建模，因此我们需要注意一个细节，就是模型的前缀和后缀之间的边界位置的 token。我们知道，模型开始输出第一个 token 的时机是“前缀最后一个 token 的输入”，那么刚刚我们拼接输入的时候，每一个 response 产生第一个 token 的位置应当是前缀部分的最后一个 token 输入的位置。在这里 PrefixGrouper 给出了两种实现方式：
-# 1. 前缀最后一个 token 还保留在前缀，那么在处理输出的时候，应当使用 include_prefix_last=1，这样每一个 suffix_output 都会拼接其对应的前缀最后一个 token 在最前面（也就是接下来的使用示例）。
-# 2. 前缀最后一个 token 在最开始的时候就复制，然后与每一个后缀拼接到一起，这样就不需要附带 include_prefix_last 参数，模型自动根据原来的 group_info 进行 split 即可（稍微麻烦一点）。
-# 举例（1）：
-# 前缀：<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant\n
-# 后缀：Hello, can I help you?<|im_end|>\n
-# 在这里，模型 response 的第一个 token（也就是后缀 tokenize 得到的第一个 input_id）是由前缀的最后一个 token（也就是 \n）输出的，当我们有多个后缀时，每一个后缀会共用前缀最后一个 token 的位置进行 loss 计算，那么此时我们就应该使用 include_prefix_last=1
-# 举例（2）（稍微麻烦一点）：
-# 前缀：<|im_start|>user\nHello<|im_end|>\n<|im_start|>assistant
-# 后缀：\nHello, can I help you?<|im_end|>\n
-# 在这里，如果有多个 response 的话，我们需要手动在每一个后缀的前面拼接前缀的最后一个 token（也就是 \n），那么前缀也就相应地去掉了最后一个 token。这时，我们就不需要附带 include_prefix_last 参数（也就是 include_prefix_last=0）
-# 得到的最终输出：prefix_output、prefix_mask、suffix_output、suffix_mask，其中 prefix_output 和 prefix_mask 的 shape 为 [b, seq_len1]，对应着 sample 数量；suffix_output 和 suffix_mask 的 shape 为 [b * group_size, seq_len2]，对应着 response 的数量。对应的 mask 则代表了有效 token 的位置（也就是非 padding 的位置）。
+# ``include_prefix_last`` 参数说明：注意到，response 的第一个 token 输出，实际上是由 prefix 最后一个 token 的输入产生的，因此 prefix 的最后一个 token 的输出需要计算 loss，那么 ``split_output`` 传入 ``include_prefix_last=1`` 参数，意味着 ``PrefixGrouper`` 会将 prefix 的最后一个 token 通过 repeat 的方式 concat 到 suffix 的最开头，得到的 mask 同样是进行过相同的处理的。
 prefix_output, prefix_mask, suffix_output, suffix_mask = (
     prefix_grouper.split_output(res.logits, include_prefix_last=1)
 )
+# 这里必须将 completion_ids 转换为 right padding，以与 suffix_output 的位置对齐
+completion_ids = prefix_grouper.convert_padding(completion_ids, completion_mask, padding_mode="right")
 # ====== 至此，输入输出的流程全部完成 ======
 
 # 获取了正常输出之后，接下来就可以按照 GRPO 来计算 loss、反向传播了，与标准 GRPO 流程完全一致。
+# NOTE: 这里有所省略，比如 advantage、kl loss、importance sampling 等，请依照实际需要编写自己的 GRPO loss。
 suffix_output = suffix_output[:, :-1]
 suffix_mask = suffix_mask[:, 1:]
-loss = (suffix_output.gather(-1, suffix_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
+# NOTE: 由于 suffix_output 使用了 ``include_prefix_last=1``，因此 ``completion_ids`` 实际上比 ``suffix_output`` 短 1 个 token
+# 因此它就不需要使用 [:, 1:] 了，因为第一个 token 开始就是有效 target。
+loss = (suffix_output.gather(-1, completion_ids.unsqueeze(-1)).squeeze(-1) - suffix_output.logsumexp(-1)).exp()
 loss = loss * suffix_mask
 loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
 (-loss).backward()
 ```
+
+- 旧版本示例：请查看 ``tests/test_equivalence``。
 
 总之，数据输入输出处理的关键点是输入数据的拼接、group_info 的统计和输出的拆分，你完全可以根据实际项目的需要和模型的设计来自定义你的处理，只需要最终接口输入的参数一致即可（接口详见使用文档）。
 

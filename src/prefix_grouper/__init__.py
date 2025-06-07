@@ -90,6 +90,9 @@ class PrefixGrouper:
         x_mask: torch.Tensor,
         padding_mode: Union[str, torch.Tensor] = "right",
     ):
+        """
+        Transform inputs padded in one manner into outputs with a different padding approach.
+        """
         assert x_mask.ndim == 2, "The mask should be a 2d Tensor."
         device = x.device
         padding_mask = create_padding_mask(

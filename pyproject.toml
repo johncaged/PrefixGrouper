@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefix_grouper"
-version = "0.0.1rc1"
+version = "0.0.1rc2"
 description = "An efficient GRPO training util."
 readme = "README.md"
 authors = [{ name = "Zikang Liu", email = "liuzikang0625@gmail.com" }]
