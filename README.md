@@ -19,7 +19,7 @@ In current mainstream GRPO training pipelines, policy model training primarily i
 
 ## News
 
-**[2025/6/9]** Our technical report is available <a src="https://arxiv.org/abs/2506.05433">here</a>!
+**[2025/6/9]** Our technical report is available <a href="https://arxiv.org/abs/2506.05433">here</a>!
 
 **[2025/6/7]** We've updated ``PrefixGrouper`` to version ``0.0.1rc2`` with better encapsulation and fewer code changes required. Welcome to use it!
 
