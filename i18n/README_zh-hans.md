@@ -19,6 +19,8 @@
 
 ## 最新动态
 
+**[2025/6/9]** 我们的技术报告已发布，<a src="https://arxiv.org/abs/2506.05433">点击此处查看</a>！
+
 **[2025/6/7]** 我们更新 ``PrefixGrouper`` 版本到 ``0.0.1rc2``，封装性更好，代码改动更少，欢迎使用！
 
 **[2025/6/3]** 我们正式发布 ``PrefixGrouper`` 工具。技术报告即将推出，敬请期待。
@@ -232,4 +234,16 @@ prefix_grouper = PrefixGrouper(group_info, padding_mode=padding_mask)
 
 ## 引用
 
-[TODO]
+如果您认为这项工作有帮助，可以引用以下论文：
+
+```bibtex
+@misc{liu2025prefixgrouperefficientgrpo,
+      title={Prefix Grouper: Efficient GRPO Training through Shared-Prefix Forward}, 
+      author={Zikang Liu and Tongtian Yue and Yepeng Tang and Longteng Guo and Junxian Cai and Qingbin Liu and Xi Chen and Jing Liu},
+      year={2025},
+      eprint={2506.05433},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2506.05433}, 
+}
+```

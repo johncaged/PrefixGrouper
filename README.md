@@ -19,6 +19,8 @@ In current mainstream GRPO training pipelines, policy model training primarily i
 
 ## News
 
+**[2025/6/9]** Our technical report is available <a src="https://arxiv.org/abs/2506.05433">here</a>!
+
 **[2025/6/7]** We've updated ``PrefixGrouper`` to version ``0.0.1rc2`` with better encapsulation and fewer code changes required. Welcome to use it!
 
 **[2025/6/3]** We release ``PrefixGrouper``. Tech report is coming, please stay tuned.
@@ -213,4 +215,16 @@ Test data in this project is strictly for **academic research purposes** with th
 
 ## Citation
 
-[TODO]
+If you find this work helpful, you can cite the following papers:
+
+```bibtex
+@misc{liu2025prefixgrouperefficientgrpo,
+      title={Prefix Grouper: Efficient GRPO Training through Shared-Prefix Forward}, 
+      author={Zikang Liu and Tongtian Yue and Yepeng Tang and Longteng Guo and Junxian Cai and Qingbin Liu and Xi Chen and Jing Liu},
+      year={2025},
+      eprint={2506.05433},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2506.05433}, 
+}
+```
