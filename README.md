@@ -102,7 +102,7 @@ prefix_grouper = PrefixGrouper.from_ungrouped_masks(
 # Here we use PrefixGrouper to concatenate inputs into final input_ids with shape [b1, seq_len].
 # NOTE: Can also input features, i.e. prompt_embeds ([b1, seq_len1, dim]), suffix_embeds ([b2, seq_len2, dim])
 input_ids = prefix_grouper.concat_input(prompt_ids, prompt_mask, completion_ids, completion_mask)
-
+attention_mask = prefix_grouper.padding_mask
 # Perform model forward - just add one extra argument
 res = model(*args, **kwargs, prefix_grouper=prefix_grouper)
 # ====== Forward process complete ======
@@ -125,6 +125,11 @@ loss = loss * suffix_mask
 loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
 (-loss).backward()
 ```
+
+Explanation of ``concat_input`` and ``split_output``:
+
+1. ``concat_input`` concatenates prompts and completions based on ``prompt_mask`` and ``completion_mask``. The resulting ``input_ids`` are organized according to the ``padding_mode`` parameter passed to ``PrefixGrouper``. For example, ``PrefixGrouper.from_ungrouped_masks(..., padding_mode="right")`` means the concatenated ``input_ids`` will use compact right padding: prompts and completions form continuous sequences without intermediate padding, left-aligned with padding added on the right.
+2. ``split_output`` splits the output logits into prefix and suffix portions, returning corresponding masks. Note that the ``include_prefix_last=1`` parameter means the last token of the original prefix will be assigned to the beginning of the suffix. Specifically: input ``prompt_ids`` (``[b1, seq_len1]``) and ``completion_ids`` (``[b2, seq_len2]``) produce output logits of size ``[b1, seq_len, dim]``. After ``split_output(..., include_prefix_last=1)``, ``prefix_output`` and ``suffix_output`` become sizes ``[b1, seq_len1 - 1, dim]`` (missing last token) and ``[b2, seq_len2 + 1, dim]`` (with extra first token). To better implement ``include_prefix_last=1``, ``PrefixGrouper`` uses left padding for prefixes and right padding for suffixes during splitting, ensuring continuous boundaries. This requires converting ``completion_ids`` to the same padding pattern via ``prefix_grouper.convert_padding``. Finally, note that after conversion, ``completion_ids`` remains shape ``[b2, seq_len2]``, while ``suffix_output`` and ``suffix_mask`` have sequence length ``seq_len2 + 1`` (due to the extra token). Thus for alignment, use ``suffix_output = suffix_output[:, :-1]`` and ``suffix_mask = suffix_mask[:, 1:]``, while ``completion_ids`` requires no modification.
 
 - Older Version Examples: Please see ``tests/test_equivalence``.
 

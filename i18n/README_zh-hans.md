@@ -102,7 +102,7 @@ prefix_grouper = PrefixGrouper.from_ungrouped_masks(
 # 这里我们利用 PrefixGrouper 将分散的输入拼接成最终的 input_ids，其 shape 为 [b1, seq_len]。
 # NOTE: 还可以输入特征，即 prompt_embeds ([b1, seq_len1, dim])，suffix_embeds ([b2, seq_len2, dim])
 input_ids = prefix_grouper.concat_input(prompt_ids, prompt_mask, completion_ids, completion_mask)
-
+attention_mask = prefix_grouper.padding_mask
 # 这里进行模型 forward，只需要多加一个参数即可
 res = model(*args, **kwargs, prefix_grouper=prefix_grouper)
 # ====== 至此，forward 流程完毕 ======
@@ -125,6 +125,11 @@ loss = loss * suffix_mask
 loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
 (-loss).backward()
 ```
+
+关于 ``concat_input`` 和 ``split_output`` 的解释：
+
+1. ``concat_input`` 将 prompt 和 completion 进行拼接，依据是 ``prompt_mask`` 和 ``completion_mask``。拼接成的 ``input_ids`` 将按照传入 ``PrefixGrouper`` 的 ``padding_mode`` 参数进行组织。即 ``PrefixGrouper.from_ungrouped_masks(..., padding_mode="right")`` 意味着拼接之后的 ``input_ids`` 将采用紧密的 right padding，即 prompt 和 completion 拼接成了连续的、中间无 padding 的序列，并且左对齐、右边添加 padding。
+2. ``split_output`` 将 output logits 进行切分，分割成前缀和后缀部分，并且输出对应的前缀和后缀的 mask。那么这里需要注意的是，``include_prefix_last=1`` 这一参数代表着原来前缀的最后一个 token 会被划分到后缀的最开始，也就是说：``prompt_ids``（``[b1, seq_len1]``）和 ``completion_ids``（``[b2, seq_len2]``）的输入，得到的 output logits 尺寸为 ``[b1, seq_len, dim]``，经过 ``split_output(..., include_prefix_last=1)`` 之后，``prefix_output`` 和 ``suffix_output`` 的尺寸分别为 ``[b1, seq_len1 - 1, dim]``（少了最后一个 token）和 ``[b2, seq_len2 + 1, dim]``（多了第一个 token）。为了更好地实现 ``include_prefix_last=1`` 这一功能，``PrefixGrouper`` 在划分前缀和后缀时，前缀固定采用左 padding，而后缀则固定采用右 padding，这样前缀和后缀划分的边界部分是连续的，更好处理，那么这就意味着，我们需要对 ``completion_ids`` 也转换成同样的 padding 模式，即采用 ``prefix_grouper.convert_padding`` 来实现。最后，注意到 ``completion_ids`` 在 ``convert_padding`` 之后，其 shape 仍为 ``[b2, seq_len2]``，而对应的 ``suffix_output`` 和 ``suffix_mask`` 的序列长度则为 ``seq_len2 + 1``（因为多了前缀最后一个 token），因此最后在对齐 token 的时候，正确的方式是 ``suffix_output = suffix_output[:, :-1]`` 和 ``suffix_mask = suffix_mask[:, 1:]``，而 ``completion_ids`` 则不需要改动。
 
 - 旧版本示例：请查看 ``tests/test_equivalence``。
 
