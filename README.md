@@ -2,6 +2,13 @@
     <img src="https://raw.githubusercontent.com/johncaged/PrefixGrouper/main/assets/images/logo.png" width="352" style="max-width: 100%;">
 </h3>
 
+<p align="center">
+    <a href="https://github.com/johncaged/PrefixGrouper/blob/main/LICENSE"><img alt="GitHub License" src="https://img.shields.io/github/license/johncaged/PrefixGrouper"></a>
+    <a href="https://github.com/johncaged/PrefixGrouper/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/johncaged/PrefixGrouper"></a>
+    <a href="https://pypi.org/project/prefix-grouper/"><img alt="PyPI" src="https://img.shields.io/pypi/v/prefix_grouper"></a>
+    <a href="https://github.com/johncaged/PrefixGrouper/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/johncaged/PrefixGrouper"></a>
+</p>
+
 <h4 align="center">
     <p>
         <b>English</b> |
