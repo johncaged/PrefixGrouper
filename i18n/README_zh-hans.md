@@ -78,6 +78,9 @@ python src/tests/equivalence/test_xxx.py --model_path /path/to/your/model
 
 ## 使用教程
 
+> [!TIP]
+> 为了更好地理解，推荐结合 ``examples`` 和 ``tests/equivalence`` 中的代码一起阅读。
+
 简单来说，``PrefixGrouper`` 主要需要对 GRPO 训练流程进行三个方面的修改：数据输入输出、注意力机制和位置编码。在全文中，我们将一个问题 query（也就是前缀）所对应的数据称为一个 sample，而由模型根据前缀所采样生成的每一个输出，我们称为一个 response。
 
 ### 数据输入输出
@@ -137,6 +140,9 @@ loss = (loss.sum(-1) / suffix_mask.sum(-1)).mean()
 
 1. ``concat_input`` 将 prompt 和 completion 进行拼接，依据是 ``prompt_mask`` 和 ``completion_mask``。拼接成的 ``input_ids`` 将按照传入 ``PrefixGrouper`` 的 ``padding_mode`` 参数进行组织。即 ``PrefixGrouper.from_ungrouped_masks(..., padding_mode="right")`` 意味着拼接之后的 ``input_ids`` 将采用紧密的 right padding，即 prompt 和 completion 拼接成了连续的、中间无 padding 的序列，并且左对齐、右边添加 padding。
 2. ``split_output`` 将 output logits 进行切分，分割成前缀和后缀部分，并且输出对应的前缀和后缀的 mask。那么这里需要注意的是，``include_prefix_last=1`` 这一参数代表着原来前缀的最后一个 token 会被划分到后缀的最开始，也就是说：``prompt_ids``（``[b1, seq_len1]``）和 ``completion_ids``（``[b2, seq_len2]``）的输入，得到的 output logits 尺寸为 ``[b1, seq_len, dim]``，经过 ``split_output(..., include_prefix_last=1)`` 之后，``prefix_output`` 和 ``suffix_output`` 的尺寸分别为 ``[b1, seq_len1 - 1, dim]``（少了最后一个 token）和 ``[b2, seq_len2 + 1, dim]``（多了第一个 token）。为了更好地实现 ``include_prefix_last=1`` 这一功能，``PrefixGrouper`` 在划分前缀和后缀时，前缀固定采用左 padding，而后缀则固定采用右 padding，这样前缀和后缀划分的边界部分是连续的，更好处理，那么这就意味着，我们需要对 ``completion_ids`` 也转换成同样的 padding 模式，即采用 ``prefix_grouper.convert_padding`` 来实现。最后，注意到 ``completion_ids`` 在 ``convert_padding`` 之后，其 shape 仍为 ``[b2, seq_len2]``，而对应的 ``suffix_output`` 和 ``suffix_mask`` 的序列长度则为 ``seq_len2 + 1``（因为多了前缀最后一个 token），因此最后在对齐 token 的时候，正确的方式是 ``suffix_output = suffix_output[:, :-1]`` 和 ``suffix_mask = suffix_mask[:, 1:]``，而 ``completion_ids`` 则不需要改动。
+
+> [!NOTE]
+> 注意：计算损失时应使用 ``split_output`` 返回的 ``suffix_mask`` 而非原始的 ``completion_mask``，因为经过处理后，``suffix_output`` 和 ``completion_ids`` 均已转换为右 padding 格式，此时原本的 ``completion_mask`` 可能不再适用。
 
 - 旧版本示例：请查看 ``tests/test_equivalence``。
 
