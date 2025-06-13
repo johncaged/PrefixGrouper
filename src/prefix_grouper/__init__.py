@@ -405,9 +405,9 @@ class PrefixGrouperForPackedSequence(PrefixGrouper):
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> PackedQKVOutputTuple:
         return (
-            q[self.packed_q_indices],
-            k[self.packed_kv_indices],
-            v[self.packed_kv_indices],
+            q[tuple(self.packed_q_indices.T)],
+            k[tuple(self.packed_kv_indices.T)],
+            v[tuple(self.packed_kv_indices.T)],
         )
 
     @property

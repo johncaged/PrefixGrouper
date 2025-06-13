@@ -287,12 +287,12 @@ class GroupInfoForPackedSequence(GroupInfo):
                     current_pos : current_pos + suffix_len
                 ]
                 # Concat Prefix + Suffix k/v
-                combined_indices = torch.cat([prefix_indices, suffix_indices])
+                combined_indices = torch.cat([prefix_indices, suffix_indices], dim=0)
                 final_indices_list.append(combined_indices)
                 current_pos += suffix_len
         if current_pos != all_valid_indices.shape[0]:
             print("WARNING: inconsistency between ``padding_mask`` and ``info_list``")
-        packed_kv_indices = torch.cat(final_indices_list)
+        packed_kv_indices = torch.cat(final_indices_list, dim=0)
         return packed_kv_indices
 
     def _precompute_ungrouped_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
