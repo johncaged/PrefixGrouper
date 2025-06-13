@@ -39,7 +39,7 @@ class UngroupFunction(FunctionABC):
             prefix_x_shape,
             suffix_x_shape,
         ) = shapes
-        other_shapes = input_shape[len(prefix_x_shape):]
+        other_shapes = input_shape[len(prefix_x_shape) :]
         # Split the grouped inputs into prefix and suffix tensors.
         prefix_x = torch.zeros(
             *prefix_x_shape,
@@ -72,7 +72,7 @@ class GroupFunction(FunctionABC):
             grouped_prefix_indices,
             grouped_suffix_indices,
         ) = indices
-        other_shapes = prefix_x.shape[len(x_shape):]
+        other_shapes = prefix_x.shape[len(x_shape) :]
         # Concat the prefix and suffix inputs into a single grouped input tensor
         x = torch.zeros(
             *x_shape,
@@ -94,7 +94,7 @@ class ConvertPaddingFunction(FunctionABC):
     ):
         input_shape = x.shape
         x_indices, o_indices = indices
-        other_shapes = input_shape[len(o_shape):]
+        other_shapes = input_shape[len(o_shape) :]
         o = torch.zeros(
             *o_shape,
             *other_shapes,

@@ -126,6 +126,16 @@ class PrefixGrouper:
         shapes = (prefix_x_shape, suffix_x_shape)
         return indices, shapes
 
+    def _ungroup(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ):
+        # TODO: Add docs here.
+        indices, shapes = self.get_ungroup_args(q.device)
+        q_prefix, q_suffix = UngroupFunction.apply(q, indices, shapes)
+        k_prefix, k_suffix = UngroupFunction.apply(k, indices, shapes)
+        v_prefix, v_suffix = UngroupFunction.apply(v, indices, shapes)
+        return q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix
+
     def ungroup(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> UngroupedTuple:
@@ -138,17 +148,12 @@ class PrefixGrouper:
 
         NOTE: You should carefully check the input and output shapes.
         """
-        indices, shapes = self.get_ungroup_args(q.device)
         # NOTE: We add transpose here for backward compatibility
         transpose_dims = (1, 2)
-        q_prefix, q_suffix = UngroupFunction.apply(
-            q.transpose(*transpose_dims), indices, shapes
-        )
-        k_prefix, k_suffix = UngroupFunction.apply(
-            k.transpose(*transpose_dims), indices, shapes
-        )
-        v_prefix, v_suffix = UngroupFunction.apply(
-            v.transpose(*transpose_dims), indices, shapes
+        q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix = self._ungroup(
+            q.transpose(*transpose_dims),
+            k.transpose(*transpose_dims),
+            v.transpose(*transpose_dims),
         )
         return (
             q_prefix.transpose(*transpose_dims),
@@ -164,9 +169,9 @@ class PrefixGrouper:
         Pack the prefix and suffix attention outputs into a single tensor according to the
         ``group_info``.
 
-        Input: o_prefix, o_suffix tensors in the shape of [b, seq, num_heads, head_dim]
+        Input: o_prefix, o_suffix tensors in the shape of [*seqs, *others]
 
-        Output: a single attention output tensor in the shape of [b, seq, num_heads, head_dim]
+        Output: a single attention output tensor in the shape of [*seqs, *others]
 
         NOTE: You should carefully check the input and output shapes.
         """
@@ -400,6 +405,20 @@ class PrefixGrouperForPackedSequence(PrefixGrouper):
             device=device,
             padding_mode=padding_mode,
         )
+
+    def ungroup(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> UngroupedTuple:
+        """
+        Ungroup the input tensors according to the ``group_info``.
+
+        Input: q, k, v tensors in the shape of [*seqs, *others]
+
+        Output: q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix
+
+        NOTE: You should carefully check the input and output shapes.
+        """
+        return self._ungroup(q, k, v)
 
     def convert_packed_qkv(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
