@@ -1,26 +1,33 @@
 """
 PyTorch autograd functions.
+NOTE: We observe that PyTorch's autograd engine can efficiently handle certain operations without
+requiring manual `torch.autograd.Function` implementations. These operations have been refactored
+into standard Python functions while maintaining backward-compatible interfaces.
 """
 
+from abc import ABC, abstractmethod
 import torch
-from torch.autograd import Function
 from .utils.typing import Tuple
 
 IndicesTuple = Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
 
 
-class UngroupFunction(Function):
+class FunctionABC(ABC):
     @staticmethod
-    def forward(
-        ctx,
-        x: torch.Tensor,  # NOTE: Shape: [b, num_heads (or 1 for common tensors), seq, ...]
+    @abstractmethod
+    def apply(*args, **kwargs):
+        pass
+
+
+class UngroupFunction(FunctionABC):
+    @staticmethod
+    def apply(
+        x: torch.Tensor,  # NOTE: Shape [*seqs, *others]
         indices: IndicesTuple,  # 4 non-zero mask index tensors
         shapes: Tuple[
             torch.Size, torch.Size
         ],  # shapes of ungrouped prefix and ungrouped suffix
     ):
-        # NOTE: This function can accept [b, num_heads (or 1 for common tensors), seq, ...]
-        assert x.ndim >= 3
         input_shape = x.shape
         (
             ungrouped_prefix_indices,
@@ -32,147 +39,67 @@ class UngroupFunction(Function):
             prefix_x_shape,
             suffix_x_shape,
         ) = shapes
-        ctx.save_for_backward(*indices)
-        ctx.input_shape = input_shape
+        other_shapes = input_shape[len(prefix_x_shape):]
         # Split the grouped inputs into prefix and suffix tensors.
         prefix_x = torch.zeros(
-            prefix_x_shape[0],
-            input_shape[1],
-            prefix_x_shape[1],
-            *input_shape[3:],
+            *prefix_x_shape,
+            *other_shapes,
             dtype=x.dtype,
             device=x.device,
         )
         suffix_x = torch.zeros(
-            suffix_x_shape[0],
-            input_shape[1],
-            suffix_x_shape[1],
-            *input_shape[3:],
+            *suffix_x_shape,
+            *other_shapes,
             dtype=x.dtype,
             device=x.device,
         )
-        prefix_x[ungrouped_prefix_indices[:, 0], :, ungrouped_prefix_indices[:, 1]] = x[
-            grouped_prefix_indices[:, 0], :, grouped_prefix_indices[:, 1]
-        ]
-        suffix_x[ungrouped_suffix_indices[:, 0], :, ungrouped_suffix_indices[:, 1]] = x[
-            grouped_suffix_indices[:, 0], :, grouped_suffix_indices[:, 1]
-        ]
+        prefix_x[tuple(ungrouped_prefix_indices.T)] = x[tuple(grouped_prefix_indices.T)]
+        suffix_x[tuple(ungrouped_suffix_indices.T)] = x[tuple(grouped_suffix_indices.T)]
         return prefix_x, suffix_x
 
-    @staticmethod
-    def backward(ctx, grad_prefix_x: torch.Tensor, grad_suffix_x: torch.Tensor):
-        (
-            ungrouped_prefix_indices,
-            ungrouped_suffix_indices,
-            grouped_prefix_indices,
-            grouped_suffix_indices,
-        ) = ctx.saved_tensors
-        input_shape = ctx.input_shape
-        # Concat the prefix and suffix grad into a single tensor.
-        grad_x = torch.zeros(
-            input_shape, dtype=grad_prefix_x.dtype, device=grad_prefix_x.device
-        )
-        grad_x[grouped_prefix_indices[:, 0], :, grouped_prefix_indices[:, 1]] = (
-            grad_prefix_x[
-                ungrouped_prefix_indices[:, 0], :, ungrouped_prefix_indices[:, 1]
-            ]
-        )
-        grad_x[grouped_suffix_indices[:, 0], :, grouped_suffix_indices[:, 1]] = (
-            grad_suffix_x[
-                ungrouped_suffix_indices[:, 0], :, ungrouped_suffix_indices[:, 1]
-            ]
-        )
-        return grad_x, None, None
 
-
-class GroupFunction(Function):
+class GroupFunction(FunctionABC):
     @staticmethod
-    def forward(
-        ctx,
-        prefix_x: torch.Tensor,  # NOTE: Shape [b, seq, ...]
-        suffix_x: torch.Tensor,  # NOTE: Shape [b, seq, ...]
+    def apply(
+        prefix_x: torch.Tensor,  # NOTE: Shape [*seqs, *others]
+        suffix_x: torch.Tensor,  # NOTE: Shape [*seqs, *others]
         indices: IndicesTuple,  # 4 non-zero mask index tensors
         x_shape: torch.Size,  # shape of grouped input x
     ):
-        # NOTE: This function can accept [b, seq, ...]
-        assert prefix_x.ndim == suffix_x.ndim >= 2
-        prefix_shape, suffix_shape = prefix_x.shape, suffix_x.shape
         (
             ungrouped_prefix_indices,
             ungrouped_suffix_indices,
             grouped_prefix_indices,
             grouped_suffix_indices,
         ) = indices
-        ctx.save_for_backward(*indices)
-        ctx.prefix_shape, ctx.suffix_shape = prefix_shape, suffix_shape
+        other_shapes = prefix_x.shape[len(x_shape):]
         # Concat the prefix and suffix inputs into a single grouped input tensor
         x = torch.zeros(
-            *x_shape[:2],
-            *prefix_shape[2:],
+            *x_shape,
+            *other_shapes,
             dtype=prefix_x.dtype,
             device=prefix_x.device,
         )
-        x[grouped_prefix_indices[:, 0], grouped_prefix_indices[:, 1]] = prefix_x[
-            ungrouped_prefix_indices[:, 0], ungrouped_prefix_indices[:, 1]
-        ]
-        x[grouped_suffix_indices[:, 0], grouped_suffix_indices[:, 1]] = suffix_x[
-            ungrouped_suffix_indices[:, 0], ungrouped_suffix_indices[:, 1]
-        ]
+        x[tuple(grouped_prefix_indices.T)] = prefix_x[tuple(ungrouped_prefix_indices.T)]
+        x[tuple(grouped_suffix_indices.T)] = suffix_x[tuple(ungrouped_suffix_indices.T)]
         return x
 
-    @staticmethod
-    def backward(ctx, grad_x: torch.Tensor):
-        (
-            ungrouped_prefix_indices,
-            ungrouped_suffix_indices,
-            grouped_prefix_indices,
-            grouped_suffix_indices,
-        ) = ctx.saved_tensors
-        prefix_shape, suffix_shape = ctx.prefix_shape, ctx.suffix_shape
-        # Split the grad into prefix grad and suffix grad
-        grad_prefix_x = torch.zeros(
-            prefix_shape, dtype=grad_x.dtype, device=grad_x.device
-        )
-        grad_prefix_x[
-            ungrouped_prefix_indices[:, 0], ungrouped_prefix_indices[:, 1]
-        ] = grad_x[grouped_prefix_indices[:, 0], grouped_prefix_indices[:, 1]]
-        grad_suffix_x = torch.zeros(
-            suffix_shape, dtype=grad_x.dtype, device=grad_x.device
-        )
-        grad_suffix_x[
-            ungrouped_suffix_indices[:, 0], ungrouped_suffix_indices[:, 1]
-        ] = grad_x[grouped_suffix_indices[:, 0], grouped_suffix_indices[:, 1]]
-        return grad_prefix_x, grad_suffix_x, None, None
 
-
-class ConvertPaddingFunction(Function):
+class ConvertPaddingFunction(FunctionABC):
     @staticmethod
-    def forward(
-        ctx,
-        x: torch.Tensor,  # NOTE: Shape: [b, seq, ...]
+    def apply(
+        x: torch.Tensor,  # NOTE: Shape: [*seqs, *others]
         indices: Tuple[torch.Tensor, torch.Tensor],  # 2 non-zero mask index tensors
-        o_shape: torch.Size,  # shape of converted output tensor
+        o_shape: torch.Size,  # shape of converted output tensor at seq dims
     ):
         input_shape = x.shape
-        ctx.input_shape = input_shape
         x_indices, o_indices = indices
-        ctx.save_for_backward(*indices)
+        other_shapes = input_shape[len(o_shape):]
         o = torch.zeros(
-            *o_shape[:2],
-            *input_shape[2:],
+            *o_shape,
+            *other_shapes,
             dtype=x.dtype,
             device=x.device,
         )
-        o[o_indices[:, 0], o_indices[:, 1]] = x[x_indices[:, 0], x_indices[:, 1]]
+        o[tuple(o_indices.T)] = x[tuple(x_indices.T)]
         return o
-
-    @staticmethod
-    def backward(ctx, grad_o: torch.Tensor):
-        x_indices, o_indices = ctx.saved_tensors
-        grad_x = torch.zeros(
-            ctx.input_shape,
-            dtype=grad_o.dtype,
-            device=grad_o.device,
-        )
-        grad_x[x_indices[:, 0], x_indices[:, 1]] = grad_o[o_indices[:, 0], o_indices[:, 1]]
-        return grad_x, None, None

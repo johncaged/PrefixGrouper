@@ -56,10 +56,11 @@ class AttentionForward(AttentionForwardABC):
         *args,
         **kwargs,
     ) -> torch.Tensor:
+        # Split q, k, v into prefix and suffix.
         q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix = (
             prefix_grouper.ungroup(q, k, v)
         )
-
+        # Call prefix self-attention.
         prefix_attn_output = self.attn_func(
             q_prefix,
             k_prefix,
@@ -68,6 +69,7 @@ class AttentionForward(AttentionForwardABC):
             *args,
             **kwargs,
         )
+        # Call suffix concat-attention.
         suffix_attn_output = self.attn_func(
             q_suffix,
             prefix_grouper.batch_repeat_cat(k_prefix, k_suffix, cat_dim=2),
@@ -76,5 +78,6 @@ class AttentionForward(AttentionForwardABC):
             *args,
             **kwargs,
         )
+        # Concat the attention outputs into a single output tensor.
         attn_output = prefix_grouper.group(prefix_attn_output, suffix_attn_output)
         return attn_output

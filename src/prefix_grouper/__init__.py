@@ -9,12 +9,13 @@ from .utils.mask import create_padding_mask
 from .utils.typing import List, Union, Tuple, Optional
 from .function import GroupFunction, UngroupFunction, ConvertPaddingFunction
 from .forward import AttentionForward, AttnFuncType
-from .info import GroupInfo
+from .info import GroupInfo, GroupInfoForPackedSequence
 
 UngroupedTuple = Tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
 ]
 SplittedOutputTuple = Tuple[torch.Tensor, torch.Tensor]
+PackedQKVOutputTuple = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 
 
 class PrefixGrouper:
@@ -22,7 +23,7 @@ class PrefixGrouper:
         self,
         group_info: Optional[List[List[int]]] = None,
         device=None,
-        padding_mode: Union[str, torch.Tensor] = "right",
+        padding_mode: Union[str, torch.Tensor, None] = "right",
     ) -> None:
         """
         NOTE: If ``group_info`` is None, then initialization is not performed, and you can
@@ -35,7 +36,7 @@ class PrefixGrouper:
         self,
         group_info: List[List[int]],
         device=None,
-        padding_mode: Union[str, torch.Tensor] = "right",
+        padding_mode: Union[str, torch.Tensor, None] = "right",
     ):
         if hasattr(self, "group_info"):
             print("WARNING: You are trying to re-init the ``group_info`` param.")
@@ -50,7 +51,7 @@ class PrefixGrouper:
         suffix_mask: torch.Tensor,
         group_sizes: Union[int, List[int]],
         device=None,
-        padding_mode: Union[str, torch.Tensor] = "right",
+        padding_mode: Union[str, torch.Tensor, None] = "right",
     ):
         """
         Automatically calculate ``group_info`` using masks and create a new instance.
@@ -88,7 +89,7 @@ class PrefixGrouper:
     def convert_padding(
         x: torch.Tensor,
         x_mask: torch.Tensor,
-        padding_mode: Union[str, torch.Tensor] = "right",
+        padding_mode: Union[str, torch.Tensor, None] = "right",
     ):
         """
         Transform inputs padded in one manner into outputs with a different padding approach.
@@ -138,10 +139,25 @@ class PrefixGrouper:
         NOTE: You should carefully check the input and output shapes.
         """
         indices, shapes = self.get_ungroup_args(q.device)
-        q_prefix, q_suffix = UngroupFunction.apply(q, indices, shapes)
-        k_prefix, k_suffix = UngroupFunction.apply(k, indices, shapes)
-        v_prefix, v_suffix = UngroupFunction.apply(v, indices, shapes)
-        return q_prefix, k_prefix, v_prefix, q_suffix, k_suffix, v_suffix
+        # NOTE: We add transpose here for backward compatibility
+        transpose_dims = (1, 2)
+        q_prefix, q_suffix = UngroupFunction.apply(
+            q.transpose(*transpose_dims), indices, shapes
+        )
+        k_prefix, k_suffix = UngroupFunction.apply(
+            k.transpose(*transpose_dims), indices, shapes
+        )
+        v_prefix, v_suffix = UngroupFunction.apply(
+            v.transpose(*transpose_dims), indices, shapes
+        )
+        return (
+            q_prefix.transpose(*transpose_dims),
+            k_prefix.transpose(*transpose_dims),
+            v_prefix.transpose(*transpose_dims),
+            q_suffix.transpose(*transpose_dims),
+            k_suffix.transpose(*transpose_dims),
+            v_suffix.transpose(*transpose_dims),
+        )
 
     def group(self, o_prefix: torch.Tensor, o_suffix: torch.Tensor) -> torch.Tensor:
         """
@@ -209,23 +225,20 @@ class PrefixGrouper:
         """
         Split the output into prefix and suffix parts.
 
-        Input: output tensors in the shape of [b, seq, ...]
+        Input: output tensors in the shape of [*seqs, ...]
 
         Output: prefix, suffix tensors in the shape of [b, seq, ...]
         """
         assert include_prefix_last >= 0
-        assert (
-            output.ndim >= 2
-        ), f"ndim of output should be >= 2 ([b, seq, ...]), but got {output.ndim}"
         indices, shapes = self.get_ungroup_args(output.device)
         prefix_output, suffix_output = UngroupFunction.apply(
-            output.unsqueeze(1),  # NOTE: unsqueeze to fit the ungroup function
+            output,
             indices,
             shapes,
         )
         prefix_output, suffix_output = (
-            prefix_output.squeeze(1),
-            suffix_output.squeeze(1),
+            prefix_output,
+            suffix_output,
         )
         prefix_mask, suffix_mask = (
             self.ungrouped_prefix_mask,
@@ -268,7 +281,7 @@ class PrefixGrouper:
             prefix=prefix,
             suffix=suffix,
             cat_dim=cat_dim,
-            num_samples=self.num_samples,
+            num_suffixes=self.num_suffixes,
         )
 
     # NOTE: We manually set property here rather than using dynamic ``__getattribute__`` to enable type hint
@@ -285,8 +298,8 @@ class PrefixGrouper:
         return self.group_info.ungrouped_suffix_lens
 
     @property
-    def num_samples(self):
-        return self.group_info.num_samples
+    def num_suffixes(self):
+        return self.group_info.num_suffixes
 
     @property
     def total_lens(self):
@@ -347,3 +360,68 @@ class PrefixGrouper:
     @property
     def suffix_x_shape(self):
         return self.group_info.suffix_x_shape
+
+
+class PrefixGrouperForPackedSequence(PrefixGrouper):
+
+    def __init__(
+        self,
+        group_info: Optional[List[List[int]]] = None,
+        device=None,
+        padding_mode: Union[torch.Tensor, None] = None,
+    ) -> None:
+        super().__init__(group_info, device=device, padding_mode=padding_mode)
+
+    def init(
+        self,
+        group_info: List[List[int]],
+        device=None,
+        padding_mode: Union[torch.Tensor, None] = None,
+    ):
+        if hasattr(self, "group_info"):
+            print("WARNING: You are trying to re-init the ``group_info`` param.")
+        self.group_info = GroupInfoForPackedSequence.from_list(
+            group_info=group_info, device=device, padding_mode=padding_mode
+        )
+
+    @classmethod
+    def from_ungrouped_masks(
+        cls,
+        prefix_mask: torch.Tensor,
+        suffix_mask: torch.Tensor,
+        group_sizes: Union[int, List[int]],
+        device=None,
+        padding_mode: Union[torch.Tensor, None] = None,
+    ):
+        return super().from_ungrouped_masks(
+            prefix_mask=prefix_mask,
+            suffix_mask=suffix_mask,
+            group_sizes=group_sizes,
+            device=device,
+            padding_mode=padding_mode,
+        )
+
+    def convert_packed_qkv(
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    ) -> PackedQKVOutputTuple:
+        return (
+            q[self.packed_q_indices],
+            k[self.packed_kv_indices],
+            v[self.packed_kv_indices],
+        )
+
+    @property
+    def packed_q_indices(self):
+        return self.group_info.packed_q_indices
+
+    @property
+    def cu_seq_lens_q(self):
+        return self.group_info.cu_seq_lens_q
+
+    @property
+    def packed_kv_indices(self):
+        return self.group_info.packed_kv_indices
+
+    @property
+    def cu_seq_lens_kv(self):
+        return self.group_info.cu_seq_lens_kv
