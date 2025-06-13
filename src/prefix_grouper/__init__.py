@@ -420,7 +420,7 @@ class PrefixGrouperForPackedSequence(PrefixGrouper):
         """
         return self._ungroup(q, k, v)
 
-    def convert_packed_qkv(
+    def prepare_packed_qkv(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
     ) -> PackedQKVOutputTuple:
         return (
